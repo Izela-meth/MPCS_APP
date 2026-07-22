@@ -315,7 +315,7 @@ calcular_markov <- function(estados, orden_estados = NULL, umbral_objetivo = 0.5
 # ============================================================================
 # 3. calcular_juegos — Calcula masa crítica (teoría de juegos evolutiva)
 # ============================================================================
-
+ 
 #' Calcular teoría de juegos y masa crítica
 #'
 #' @param P matriz de transición de Markov (opcional)
@@ -332,23 +332,23 @@ calcular_juegos <- function(P = NULL, R_factor = 0.65) {
   a_RR <- 0.5   # Refuerzo mutuo de la inacción
   
   # --- Calcular masa crítica (p*) ---
-  # p* es el umbral mínimo de adoptantes para que la conducta sea auto-sostenible
+  # p* es el umbral mínimo de adoptantes para que la conducta sea auto-sostenible.
+  # Ecuación (Sección 3.5.3 / 2.4 del artículo): p* = (a_RR - a_AR) / (a_AA - a_AR - a_RA + a_RR)
   p_star <- (a_RR - a_AR) / (a_AA - a_AR - a_RA + a_RR)
-  
-  # Ajustar por factor de recursos
-  # A mayor recursos, menor masa crítica necesaria
-  if (!is.null(R_factor) && R_factor >= 0 && R_factor <= 1) {
-    p_star <- p_star * (1 - R_factor * 0.3)
-  }
-  
-  # Asegurar que p_star esté en [0, 1]
   p_star <- max(0, min(1, p_star))
   
+  # NOTA IMPORTANTE — R_factor NO se aplica aquí.
+  # El artículo (Sección 3.5.4 / 2.5) especifica un único punto donde entra el
+  # factor de disponibilidad de recursos: k = min(1, I_MPCS * R_factor * 1.5),
+  # calculado en calcular_indice(). Aplicarlo también dentro de p* duplicaba
+  # su efecto (doble conteo) e inflaba I_Juegos y, en cascada, I_MPCS.
+  # R_factor se mantiene como argumento por compatibilidad de firma con las
+  # llamadas existentes en server(), pero no se usa en este cálculo.
+  
   # --- Índice de juegos ---
-  # Para que sea comparable con otros índices (mayor = mejor),
-  # se invierte: I_juegos = 1 - p_star
-  # I_juegos alto significa que se necesita menos masa crítica (mejor)
-  score <- 1 - p_star
+  # I_Juegos = p*, sin inversión ni transformación adicional (artículo, 3.5.3):
+  # "Este valor de p* ingresa sin transformación adicional como I_Juegos".
+  score <- p_star
   
   return(list(
     p_star = p_star,
