@@ -1,8 +1,8 @@
-# ============================================================================
+# ==============================================================================
 # MPCS_APP — Aplicación Shiny del Modelo Predictivo de Cambio Conductual por Sistemas
-# ============================================================================
+# ==============================================================================
 # Repositorio: https://github.com/Izela-meth/MPCS_APP
-# ============================================================================
+# ==============================================================================
 
 # --- Cargar librerías ---
 library(shiny)
@@ -27,9 +27,9 @@ if (!file.exists("data/demo_data.csv")) {
   write.csv(datos_demo, "data/demo_data.csv", row.names = FALSE)
 }
 
-# ============================================================================
+# ==============================================================================
 # UI — INTERFAZ DE USUARIO
-# ============================================================================
+# ==============================================================================
 
 ui <- page_navbar(
   title = tags$div(
@@ -39,9 +39,9 @@ ui <- page_navbar(
   ),
   theme = bs_theme(bootswatch = "flatly", version = 5),
   
-  # ========================================================================
+  # ============================================================================
   # Pestaña 1: Carga de Datos
-  # ========================================================================
+  # ============================================================================
   nav_panel(
     "1. Carga de Datos",
     fluidRow(
@@ -75,9 +75,9 @@ ui <- page_navbar(
     )
   ),
   
-  # ========================================================================
+  # ============================================================================
   # Pestaña 2: Configuración
-  # ========================================================================
+  # ============================================================================
   nav_panel(
     "2. Configuración",
     fluidRow(
@@ -136,9 +136,9 @@ ui <- page_navbar(
     )
   ),
   
-  # ========================================================================
+  # ============================================================================
   # Pestaña 3: Resultados
-  # ========================================================================
+  # ============================================================================
   nav_panel(
     "3. Resultados",
     fluidRow(
@@ -193,9 +193,9 @@ ui <- page_navbar(
     )
   ),
   
-  # ========================================================================
+  # ============================================================================
   # Pestaña 4: Reporte y Descarga
-  # ========================================================================
+  # ============================================================================
   nav_panel(
     "4. Reporte y Descarga",
     fluidRow(
@@ -223,9 +223,9 @@ ui <- page_navbar(
   )
 )
 
-# ============================================================================
+# ==============================================================================
 # SERVER — LÓGICA DE LA APLICACIÓN
-# ============================================================================
+# ==============================================================================
 
 server <- function(input, output, session) {
   
@@ -236,9 +236,9 @@ server <- function(input, output, session) {
     plots = NULL
   )
   
-  # ========================================================================
+  # ==========================================================================
   # CARGA DE DATOS DE ARCHIVO
-  # ========================================================================
+  # ==========================================================================
   observeEvent(input$file, {
     req(input$file)
     ext <- tools::file_ext(input$file$datapath)
@@ -270,9 +270,9 @@ server <- function(input, output, session) {
     updateSelectInput(session, "group_var", choices = c("Ninguno (Global)", vars), selected = if ("Region" %in% vars) "Region" else "Ninguno (Global)")
   })
   
-  # ========================================================================
+  # ==========================================================================
   # CARGA DE DATOS DE DEMOSTRACIÓN
-  # ========================================================================
+  # ==========================================================================
   observeEvent(input$load_demo, {
     showNotification("Cargando datos de demostración...", type = "message")
     
@@ -302,9 +302,9 @@ server <- function(input, output, session) {
     updateSelectInput(session, "group_var", choices = c("Ninguno (Global)", vars), selected = "Region")
   })
   
-  # ========================================================================
+  # ==========================================================================
   # SALIDAS DE VISTA PREVIA
-  # ========================================================================
+  # ==========================================================================
   output$data_preview <- renderDT({
     req(rv$data)
     datatable(head(rv$data, 10), options = list(scrollX = TRUE, dom = 't', pageLength = 10), rownames = FALSE)
@@ -318,9 +318,9 @@ server <- function(input, output, session) {
     print(table(sapply(rv$data, class)))
   })
   
-  # ========================================================================
+  # ==========================================================================
   # UI DINÁMICA
-  # ========================================================================
+  # ==========================================================================
   output$graph_vars_ui <- renderUI({
     req(rv$data)
     vars_num <- names(rv$data)[sapply(rv$data, is.numeric)]
@@ -347,20 +347,50 @@ server <- function(input, output, session) {
     if (abs(total - 1) < 0.01) paste0(total, " ✅") else paste0(total, " ⚠️ (debe sumar 1)")
   })
   
-  # ========================================================================
-  # EJECUTAR MPCS
-  # ========================================================================
+  # ==========================================================================
+  # EJECUTAR MPCS — VERSIÓN CORREGIDA
+  # ==========================================================================
   observeEvent(input$run_mpcs, {
     req(rv$data)
+    
+    # --- Validaciones ---
     if (is.null(input$graph_vars) || length(input$graph_vars) < 5) {
       showNotification("Seleccione al menos 5 variables.", type = "error")
-      output$validation_msg <- renderUI({ tags$div(class = "alert alert-danger mt-2", icon("exclamation-triangle"), " Seleccione al menos 5 variables.") })
+      output$validation_msg <- renderUI({ 
+        tags$div(class = "alert alert-danger mt-2", 
+                 icon("exclamation-triangle"), 
+                 " Seleccione al menos 5 variables.")
+      })
+      return()
+    }
+    output$validation_msg <- renderUI({ NULL })
+    
+    if (is.null(input$markov_var) || input$markov_var == "") {
+      showNotification("Seleccione una variable de estados Markov.", type = "error")
+      output$validation_msg <- renderUI({ 
+        tags$div(class = "alert alert-danger mt-2", 
+                 icon("exclamation-triangle"), 
+                 " Seleccione una variable de estados Markov.")
+      })
+      return()
+    }
+    
+    estados <- rv$data[[input$markov_var]]
+    if (length(unique(na.omit(estados))) < 3) {
+      showNotification("La variable de Markov debe tener al menos 3 estados.", type = "error")
+      output$validation_msg <- renderUI({ 
+        tags$div(class = "alert alert-danger mt-2", 
+                 icon("exclamation-triangle"), 
+                 " La variable de Markov debe tener al menos 3 estados.")
+      })
       return()
     }
     output$validation_msg <- renderUI({ NULL })
     
     withProgress(message = 'Ejecutando MPCS...', value = 0, {
       data_analysis <- rv$data
+      
+      # --- Agrupación ---
       if (input$group_var == "Ninguno (Global)") {
         data_analysis$Group <- "Global"
         grupos <- "Global"
@@ -371,59 +401,118 @@ server <- function(input, output, session) {
       }
       
       results_list <- list()
+      
       for (i in seq_along(grupos)) {
         g <- grupos[i]
         incProgress(1 / length(grupos), detail = paste("Procesando grupo:", g))
+        
         sub <- data_analysis[data_analysis$Group == g, ]
+        
         if (nrow(sub) < 30) {
           showNotification(paste("Grupo", g, "tiene menos de 30 observaciones. Saltando."), type = "message")
           next
         }
+        
+        # --- 1. Grafo ---
         graph_data <- sub[, input$graph_vars, drop = FALSE]
         graph_res <- calcular_grafo(graph_data, input$graph_vars, input$threshold)
+        
+        if (is.null(graph_res$graph) || vcount(graph_res$graph) < 2) {
+          showNotification(paste("Grupo", g, "no tiene suficientes conexiones en el grafo. Usando valor por defecto."), type = "message")
+          graph_res$score <- 0.5
+          graph_res$optimal_node <- "Sin nodo"
+          graph_res$graph <- NULL
+        }
+        
+        # --- 2. Markov ---
         markov_res <- calcular_markov(sub[[input$markov_var]], umbral_objetivo = 0.50)
+        
+        # --- 3. Juegos ---
         games_res <- calcular_juegos(markov_res$mat, input$R_factor)
-        index_res <- calcular_indice(graph_res$score, markov_res$score, games_res$score, input$w1, input$w2, input$w3, input$R_factor)
+        
+        # --- 4. Índice MPCS ---
+        index_res <- calcular_indice(
+          I_grafo = graph_res$score,
+          I_markov = markov_res$score,
+          I_juegos = games_res$score,
+          w1 = input$w1,
+          w2 = input$w2,
+          w3 = input$w3,
+          R_factor = input$R_factor
+        )
         
         results_list[[as.character(g)]] <- list(
-          grupo = g, n = nrow(sub), nodo_optimo = graph_res$optimal_node,
-          I_grafo = graph_res$score, I_markov = markov_res$score, I_juegos = games_res$score,
-          I_MPCS = index_res$I_MPCS, k = index_res$k, tipo = index_res$nudge_type,
-          graph = graph_res$graph, graph_data = graph_data,
-          markov_mat = markov_res$mat, sim_base = markov_res$sim_base,
-          dist_actual = markov_res$dist_actual, T_base = markov_res$T_base
+          grupo = g,
+          n = nrow(sub),
+          nodo_optimo = if (is.null(graph_res$optimal_node)) "Sin nodo" else graph_res$optimal_node,
+          I_grafo = graph_res$score,
+          I_markov = markov_res$score,
+          I_juegos = games_res$score,
+          I_MPCS = index_res$I_MPCS,
+          k = index_res$k,
+          tipo = index_res$nudge_type,
+          graph = graph_res$graph,
+          graph_data = graph_data,
+          markov_mat = markov_res$mat,
+          sim_base = markov_res$sim_base,
+          dist_actual = markov_res$dist_actual,
+          T_base = markov_res$T_base
         )
       }
       
       if (length(results_list) == 0) {
-        showNotification("No se pudo procesar ningún grupo.", type = "error")
+        showNotification("No se pudo procesar ningún grupo. Verifique que al menos un grupo tenga >30 observaciones.", type = "error")
         return()
       }
       
       rv$results <- results_list
+      
+      # --- Tabla de resultados ---
       results_df <- do.call(rbind, lapply(results_list, function(r) {
-        data.frame(Grupo = r$grupo, n = r$n, I_MPCS = round(r$I_MPCS, 4),
-                   Nodo_Optimo = r$nodo_optimo, k = round(r$k, 4),
-                   Tipo_Nudge = r$tipo, stringsAsFactors = FALSE)
+        data.frame(
+          Grupo = r$grupo,
+          n = r$n,
+          I_MPCS = round(r$I_MPCS, 4),
+          Nodo_Optimo = r$nodo_optimo,
+          k = round(r$k, 4),
+          Tipo_Nudge = r$tipo,
+          stringsAsFactors = FALSE
+        )
       }))
+      
       rv$results_df <- results_df
       
-      rv$plots <- generate_plots(data_analysis, input$graph_vars, input$markov_var, results_df, results_list, input$threshold)
-      showNotification(paste("MPCS ejecutado correctamente para", nrow(results_df), "grupos"), type = "message")
+      # --- Generar gráficos ---
+      rv$plots <- generate_plots(
+        data = data_analysis,
+        graph_vars = input$graph_vars,
+        markov_var = input$markov_var,
+        results = results_df,
+        results_list = results_list,
+        threshold = input$threshold
+      )
+      
+      showNotification(paste("MPCS ejecutado correctamente para", nrow(results_df), "grupos."), type = "message")
     })
   })
   
-  # ========================================================================
+  # ==========================================================================
   # FUNCIONES PARA GRÁFICOS
-  # ========================================================================
+  # ==========================================================================
   generate_plots <- function(data, graph_vars, markov_var, results, results_list, threshold) {
-    p_graph <- NULL; p_states <- NULL; p_markov <- NULL; p_rank <- NULL
+    p_graph <- NULL
+    p_states <- NULL
+    p_markov <- NULL
+    p_rank <- NULL
+    
     if (is.null(data) || nrow(data) == 0 || is.null(results) || nrow(results) == 0) {
       return(list(graph = NULL, states = NULL, markov = NULL, rank = NULL))
     }
     
     first_group <- results$Grupo[1]
     r <- results_list[[as.character(first_group)]]
+    
+    # --- Gráfico 1: Grafo ---
     if (!is.null(r$graph) && vcount(r$graph) > 0) {
       V(r$graph)$color <- ifelse(V(r$graph)$name == r$nodo_optimo, "#C0392B", "#F0DFC0")
       V(r$graph)$size <- ifelse(V(r$graph)$name == r$nodo_optimo, 25, 15)
@@ -431,15 +520,20 @@ server <- function(input, output, session) {
         plot(r$graph, layout = layout_with_fr(r$graph), vertex.label.cex = 0.8,
              vertex.label.color = "black", vertex.label.dist = 2, edge.color = "gray60",
              edge.width = 1.5, main = paste("Grafo del sistema —", first_group), cex.main = 0.9)
-        legend("topright", legend = c("Nodo óptimo", "Otros nodos"), fill = c("#C0392B", "#F0DFC0"), cex = 0.8, bty = "n")
+        legend("topright", legend = c("Nodo óptimo", "Otros nodos"), 
+               fill = c("#C0392B", "#F0DFC0"), cex = 0.8, bty = "n")
       }
     }
     
+    # --- Gráfico 2: Distribución de estados ---
     if (!is.null(markov_var) && markov_var %in% names(data)) {
       p_states <- function() {
         if (!"Group" %in% names(data)) data$Group <- "Global"
         plot_data <- data[!is.na(data$Group) & !is.na(data[[markov_var]]), ]
-        if (nrow(plot_data) == 0) return(ggplot() + theme_void() + annotate("text", x = 0.5, y = 0.5, label = "No hay datos"))
+        if (nrow(plot_data) == 0) {
+          return(ggplot() + theme_void() + 
+                   annotate("text", x = 0.5, y = 0.5, label = "No hay datos"))
+        }
         ggplot(plot_data, aes(x = .data[["Group"]], fill = .data[[markov_var]])) + 
           geom_bar(position = "fill") +
           scale_fill_brewer(palette = "Set2") + theme_minimal() +
@@ -448,25 +542,31 @@ server <- function(input, output, session) {
       }
     }
     
+    # --- Gráfico 3: Ranking ---
     if (!is.null(results) && nrow(results) > 0) {
       p_rank <- function() {
         ggplot(results, aes(x = reorder(Grupo, I_MPCS), y = I_MPCS, fill = Tipo_Nudge)) +
           geom_col(width = 0.7) + coord_flip() + theme_minimal(base_size = 12) +
           labs(x = "Grupo", y = "Índice MPCS", fill = "Tipo Nudge") +
-          scale_fill_manual(values = c("Informativo" = "#74B3CE", "Estructural" = "#2E86AB",
-                                       "Normativo" = "#E84855", "Sistémico multi-nudge" = "#1A3A5C")) +
+          scale_fill_manual(
+            values = c("Informativo" = "#74B3CE", "Estructural" = "#2E86AB",
+                       "Normativo" = "#E84855", "Sistémico multi-nudge" = "#1A3A5C")
+          ) +
           geom_text(aes(label = round(I_MPCS, 3)), hjust = -0.2, size = 3.5) +
           theme(legend.position = "bottom")
       }
     }
     
+    # --- Gráfico 4: Trayectorias de Markov ---
     p_markov <- function() {
       r <- results_list[[as.character(first_group)]]
+      
       if (!is.null(r$sim_base) && nrow(r$sim_base) > 0) {
         m <- ncol(r$sim_base)
         if (m >= 2) {
           adh_base <- r$sim_base[, m] + r$sim_base[, max(1, m-1)]
           t <- 1:length(adh_base)
+          
           P_n <- r$markov_mat
           if (!is.null(P_n)) {
             for (i in 1:(nrow(P_n)-1)) {
@@ -483,31 +583,51 @@ server <- function(input, output, session) {
           } else {
             adh_nudge <- adh_base * 1.3
           }
-          df <- data.frame(Tiempo = c(t, t), Adherencia = c(adh_base, adh_nudge),
-                           Escenario = rep(c("Sin nudge", "Con nudge"), each = length(t)))
+          
+          df <- data.frame(
+            Tiempo = c(t, t),
+            Adherencia = c(adh_base, adh_nudge),
+            Escenario = rep(c("Sin nudge", "Con nudge"), each = length(t))
+          )
+          
           return(ggplot(df, aes(x = Tiempo, y = Adherencia, color = Escenario)) +
-                   geom_line(linewidth = 1.2) + geom_hline(yintercept = 0.50, linetype = "dashed", color = "gray50") +
-                   scale_y_continuous(labels = scales::percent) + theme_minimal(base_size = 12) +
-                   scale_color_manual(values = c("Sin nudge" = "#E74C3C", "Con nudge" = "#2ECC71")) +
-                   labs(x = "Período", y = "P(Adherencia ≥ 50%)") + theme(legend.position = "bottom"))
+                   geom_line(linewidth = 1.2) + 
+                   geom_hline(yintercept = 0.50, linetype = "dashed", color = "gray50") +
+                   scale_y_continuous(labels = scales::percent) + 
+                   theme_minimal(base_size = 12) +
+                   scale_color_manual(
+                     values = c("Sin nudge" = "#E74C3C", "Con nudge" = "#2ECC71")
+                   ) +
+                   labs(x = "Período", y = "P(Adherencia ≥ 50%)") + 
+                   theme(legend.position = "bottom"))
         }
       }
+      
+      # Fallback: simulación simple
       t <- 1:15
-      df <- data.frame(Tiempo = t, Sin_Nudge = pnorm(t, mean = 8, sd = 3), Con_Nudge = pnorm(t, mean = 6, sd = 2.5)) %>%
+      df <- data.frame(
+        Tiempo = t,
+        Sin_Nudge = pnorm(t, mean = 8, sd = 3),
+        Con_Nudge = pnorm(t, mean = 6, sd = 2.5)
+      ) %>%
         pivot_longer(-Tiempo, names_to = "Escenario", values_to = "Prob_Adherencia")
+      
       ggplot(df, aes(x = Tiempo, y = Prob_Adherencia, color = Escenario)) +
-        geom_line(linewidth = 1.2) + geom_hline(yintercept = 0.50, linetype = "dashed", color = "gray50") +
-        scale_y_continuous(labels = scales::percent) + theme_minimal(base_size = 12) +
+        geom_line(linewidth = 1.2) + 
+        geom_hline(yintercept = 0.50, linetype = "dashed", color = "gray50") +
+        scale_y_continuous(labels = scales::percent) + 
+        theme_minimal(base_size = 12) +
         scale_color_manual(values = c("Sin_Nudge" = "#E74C3C", "Con_Nudge" = "#2ECC71")) +
-        labs(x = "Período", y = "P(Adherencia ≥ 50%)") + theme(legend.position = "bottom")
+        labs(x = "Período", y = "P(Adherencia ≥ 50%)") + 
+        theme(legend.position = "bottom")
     }
     
     return(list(graph = p_graph, states = p_states, markov = p_markov, rank = p_rank))
   }
   
-  # ========================================================================
+  # ==========================================================================
   # SALIDAS DE RESULTADOS
-  # ========================================================================
+  # ==========================================================================
   output$results_table <- renderDT({
     req(rv$results_df)
     datatable(rv$results_df, options = list(scrollX = TRUE, pageLength = 10), rownames = FALSE) %>%
@@ -525,48 +645,62 @@ server <- function(input, output, session) {
   output$plot_states <- renderPlot({
     req(rv$plots)
     if (!is.null(rv$plots$states)) rv$plots$states() else {
-      ggplot() + theme_void() + annotate("text", x = 0.5, y = 0.5, label = "No se pudo generar el gráfico.")
+      ggplot() + theme_void() + 
+        annotate("text", x = 0.5, y = 0.5, label = "No se pudo generar el gráfico.")
     }
   })
   
   output$plot_markov <- renderPlot({
     req(rv$plots)
     if (!is.null(rv$plots$markov)) rv$plots$markov() else {
-      ggplot() + theme_void() + annotate("text", x = 0.5, y = 0.5, label = "No se pudo generar el gráfico.")
+      ggplot() + theme_void() + 
+        annotate("text", x = 0.5, y = 0.5, label = "No se pudo generar el gráfico.")
     }
   })
   
   output$plot_ranking <- renderPlot({
     req(rv$plots)
     if (!is.null(rv$plots$rank)) rv$plots$rank() else {
-      ggplot() + theme_void() + annotate("text", x = 0.5, y = 0.5, label = "No se pudo generar el gráfico.")
+      ggplot() + theme_void() + 
+        annotate("text", x = 0.5, y = 0.5, label = "No se pudo generar el gráfico.")
     }
   })
   
   output$interpretation_text <- renderUI({
     req(rv$results_df)
+    
     top_group <- rv$results_df[which.max(rv$results_df$I_MPCS), ]
     bottom_group <- rv$results_df[which.min(rv$results_df$I_MPCS), ]
+    
     HTML(paste0(
       "<div class='well'>",
       "<p><b>📊 Resumen de resultados</b></p>",
-      "<p>Se analizaron <b>", nrow(rv$results_df), " grupos</b> con un total de <b>", sum(rv$results_df$n), " observaciones</b>.</p>",
+      "<p>Se analizaron <b>", nrow(rv$results_df), " grupos</b> con un total de <b>", 
+      sum(rv$results_df$n), " observaciones</b>.</p>",
       "<hr>",
-      "<p><b>🔴 Grupo con mayor prioridad:</b> <span style='color:#C0392B;font-weight:bold;'>", top_group$Grupo, "</span> (I_MPCS = ", round(top_group$I_MPCS, 4), ")</p>",
+      "<p><b>🔴 Grupo con mayor prioridad:</b> <span style='color:#C0392B;font-weight:bold;'>", 
+      top_group$Grupo, "</span> (I_MPCS = ", round(top_group$I_MPCS, 4), ")</p>",
       "<p>El nodo óptimo para la intervención es <b>", top_group$Nodo_Optimo, "</b>.</p>",
-      "<p>Se recomienda aplicar un <b>", top_group$Tipo_Nudge, "</b> con intensidad k = ", round(top_group$k, 4), ".</p>",
+      "<p>Se recomienda aplicar un <b>", top_group$Tipo_Nudge, 
+      "</b> con intensidad k = ", round(top_group$k, 4), ".</p>",
       "<hr>",
-      "<p><b>🟢 Grupo con menor prioridad:</b> <span style='color:#2ECC71;font-weight:bold;'>", bottom_group$Grupo, "</span> (I_MPCS = ", round(bottom_group$I_MPCS, 4), ")</p>",
+      "<p><b>🟢 Grupo con menor prioridad:</b> <span style='color:#2ECC71;font-weight:bold;'>", 
+      bottom_group$Grupo, "</span> (I_MPCS = ", round(bottom_group$I_MPCS, 4), ")</p>",
       "</div>"
     ))
   })
   
-  # ========================================================================
+  # ==========================================================================
   # DESCARGAS
-  # ========================================================================
+  # ==========================================================================
   output$download_csv <- downloadHandler(
-    filename = function() { paste0("MPCS_Resultados_", Sys.Date(), ".csv") },
-    content = function(file) { req(rv$results_df); write.csv(rv$results_df, file, row.names = FALSE) }
+    filename = function() {
+      paste0("MPCS_Resultados_", Sys.Date(), ".csv")
+    },
+    content = function(file) {
+      req(rv$results_df)
+      write.csv(rv$results_df, file, row.names = FALSE)
+    }
   )
   
   output$download_report <- downloadHandler(
@@ -579,8 +713,13 @@ server <- function(input, output, session) {
         return()
       }
       
+      top_group <- rv$results_df[which.max(rv$results_df$I_MPCS), ]
+      
       html_lines <- c(
-        "<!DOCTYPE html>", "<html>", "<head>", "<meta charset='UTF-8'>",
+        "<!DOCTYPE html>",
+        "<html>",
+        "<head>",
+        "<meta charset='UTF-8'>",
         "<title>Reporte MPCS</title>",
         "<style>",
         "body { font-family: Arial, sans-serif; margin: 40px; max-width: 1000px; margin-left: auto; margin-right: auto; }",
@@ -593,9 +732,12 @@ server <- function(input, output, session) {
         "tr:hover { background-color: #f5f5f5; }",
         ".highlight { background-color: #FFEAA7; padding: 15px; border-radius: 5px; border-left: 5px solid #F39C12; }",
         ".footer { margin-top: 50px; font-size: 12px; color: #7F8C8D; border-top: 2px solid #ddd; padding-top: 15px; text-align: center; }",
-        "</style>", "</head>", "<body>",
+        "</style>",
+        "</head>",
+        "<body>",
         "<h1>📊 Reporte del MPCS</h1>",
-        "<p><b>Fecha de generación:</b> ", format(Sys.Date(), "%d de %B de %Y"), " a las ", format(Sys.time(), "%H:%M"), "</p>",
+        "<p><b>Fecha de generación:</b> ", format(Sys.Date(), "%d de %B de %Y"), 
+        " a las ", format(Sys.time(), "%H:%M"), "</p>",
         "<hr>",
         "<h2>📋 1. Resumen de resultados</h2>",
         "<p><b>Grupos analizados:</b> ", nrow(rv$results_df), "</p>",
@@ -625,9 +767,6 @@ server <- function(input, output, session) {
         )
       }
       
-      top_group <- rv$results_df[which.max(rv$results_df$I_MPCS), ]
-      bottom_group <- rv$results_df[which.min(rv$results_df$I_MPCS), ]
-      
       html_lines <- c(
         html_lines,
         "</tbody></table>",
@@ -642,20 +781,38 @@ server <- function(input, output, session) {
         "<li><b>Tipo de nudge recomendado:</b> <b>", top_group$Tipo_Nudge, "</b></li>",
         "</ul>",
         "</div>",
-        "<br>",
-        "<div style='background-color: #f0f0f0; padding: 15px; border-radius: 5px;'>",
-        "<p><b>🟢 Grupo con menor prioridad:</b> ", bottom_group$Grupo, 
-        " (I_MPCS = ", round(bottom_group$I_MPCS, 4), ")</p>",
-        "</div>",
-        "<h2>📝 4. Recomendaciones operativas</h2>",
-        "<p>Para el grupo prioritario (<b>", top_group$Grupo, "</b>), se recomienda:</p>",
-        "<ul>",
-        "<li>Aplicar un <b>nudge de tipo ", top_group$Tipo_Nudge, "</b></li>",
-        "<li>Con una intensidad de <b>k = ", round(top_group$k, 4), "</b></li>",
-        "<li>Focalizado en el nodo <b>", top_group$Nodo_Optimo, "</b></li>",
-        "</ul>",
-        "<h2>📚 5. Citación</h2>",
+        "<h2>📚 4. Citación</h2>",
         "<p>MPCS: A Predictive Model of Systemic Behavioral Change... (Autor, año).</p>",
         "<div class='footer'>",
         "<p>Reporte generado automáticamente por <b>MPCS Calculator</b></p>",
-        "<p>Repositorio:
+        "<p>Repositorio: <a href='https://github.com/Izela-meth/MPCS_APP' target='_blank'>",
+        "https://github.com/Izela-meth/MPCS_APP</a></p>",
+        "</div>",
+        "</body>",
+        "</html>"
+      )
+      
+      writeLines(html_lines, file)
+      showNotification("Reporte HTML generado correctamente.", type = "message")
+    }
+  )
+}
+
+# ==============================================================================
+# EJECUTAR LA APLICACIÓN CON FOOTER
+# ==============================================================================
+
+app <- shinyApp(ui = ui, server = server)
+
+app <- tagList(
+  app,
+  tags$footer(
+    class = "bg-light p-3 text-center small border-top mt-4",
+    tags$b("Citación:"), 
+    "MPCS: A Predictive Model of Systemic Behavioral Change... (Autor, año). ",
+    tags$a("DOI del artículo", href = "#"), " | ",
+    tags$a("Repositorio GitHub", href = "https://github.com/Izela-meth/MPCS_APP")
+  )
+)
+
+app
