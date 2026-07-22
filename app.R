@@ -276,21 +276,44 @@ server <- function(input, output, session) {
     updateSelectInput(session, "group_var", choices = c("Ninguno (Global)", vars), selected = if ("Region" %in% vars) "Region" else "Ninguno (Global)")
   })
   
+  # ========================================================================
+  # CARGA DE DATOS DE DEMOSTRACIÓN (CORREGIDO)
+  # ========================================================================
   observeEvent(input$load_demo, {
-    if (file.exists("data/demo_data.csv")) {
-      rv$data <- read.csv("data/demo_data.csv")
-      showNotification("Datos de demostración cargados.", type = "success")
-      vars <- names(rv$data)
-      vars_num <- names(rv$data)[sapply(rv$data, is.numeric)]
-      updateSelectInput(session, "graph_vars", choices = vars_num, selected = vars_num[1:min(5, length(vars_num))])
-      updateSelectInput(session, "markov_var", choices = vars, selected = "Estado_Markov")
-      updateSelectInput(session, "group_var", choices = c("Ninguno (Global)", vars), selected = "Region")
-    } else {
-      showNotification("Generando datos de demostración...", type = "info")
+    showNotification("Cargando datos de demostración...", type = "message")
+    
+    # Función para generar datos si no hay archivo
+    generar_y_cargar_demo <- function() {
       datos_demo <- generar_demo_data(1000, 123)
       rv$data <- datos_demo
-      showNotification("Datos de demostración generados.", type = "success")
+      showNotification("Datos de demostración generados exitosamente (n=1000).", type = "success")
     }
+    
+    # Intentar cargar desde archivo
+    if (file.exists("data/demo_data.csv")) {
+      tryCatch({
+        rv$data <- read.csv("data/demo_data.csv")
+        showNotification("Datos de demostración cargados desde archivo.", type = "success")
+      }, error = function(e) {
+        showNotification(paste("Error al leer archivo:", e$message), type = "warning")
+        generar_y_cargar_demo()
+      })
+    } else {
+      # Si no existe el archivo, generar datos
+      showNotification("No se encontró archivo. Generando datos de demostración...", type = "message")
+      generar_y_cargar_demo()
+    }
+    
+    # Actualizar selectores
+    vars <- names(rv$data)
+    vars_num <- names(rv$data)[sapply(rv$data, is.numeric)]
+    updateSelectInput(session, "graph_vars", choices = vars_num, 
+                      selected = vars_num[1:min(5, length(vars_num))])
+    updateSelectInput(session, "markov_var", choices = vars, 
+                      selected = "Estado_Markov")
+    updateSelectInput(session, "group_var", 
+                      choices = c("Ninguno (Global)", vars), 
+                      selected = "Region")
   })
   
   # --- Vista previa ---
