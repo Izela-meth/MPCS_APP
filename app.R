@@ -567,15 +567,12 @@ server <- function(input, output, session) {
   })
   
   # ========================================================================
-  # DESCARGAS
+  # DESCARGA DE REPORTE (HTML ESTABLE)
   # ========================================================================
-  output$download_csv <- downloadHandler(
-    filename = function() { paste0("MPCS_Resultados_", Sys.Date(), ".csv") },
-    content = function(file) { req(rv$results_df); write.csv(rv$results_df, file, row.names = FALSE) }
-  )
-  
   output$download_report <- downloadHandler(
-    filename = function() { paste0("MPCS_Reporte_", Sys.Date(), ".pdf") },
+    filename = function() {
+      paste0("MPCS_Reporte_", Sys.Date(), ".html")
+    },
     content = function(file) {
       # Verificar que hay resultados
       if (is.null(rv$results_df) || nrow(rv$results_df) == 0) {
@@ -583,49 +580,54 @@ server <- function(input, output, session) {
         return()
       }
       
-      # Crear un reporte temporal en HTML (más estable que PDF directamente)
-      tempReport <- file.path(tempdir(), "reporte_mpcs.html")
-      
-      # Contenido del reporte en HTML
-      html_content <- c(
+      # --- Generar el HTML del reporte ---
+      html_lines <- c(
         "<!DOCTYPE html>",
         "<html>",
         "<head>",
         "<meta charset='UTF-8'>",
         "<title>Reporte MPCS</title>",
         "<style>",
-        "body { font-family: Arial, sans-serif; margin: 40px; }",
-        "h1 { color: #2C3E50; }",
-        "h2 { color: #34495E; border-bottom: 2px solid #3498DB; padding-bottom: 5px; }",
+        "body { font-family: Arial, sans-serif; margin: 40px; max-width: 1000px; margin-left: auto; margin-right: auto; }",
+        "h1 { color: #2C3E50; border-bottom: 3px solid #3498DB; padding-bottom: 10px; }",
+        "h2 { color: #34495E; border-bottom: 2px solid #3498DB; padding-bottom: 5px; margin-top: 30px; }",
         "table { border-collapse: collapse; width: 100%; margin: 20px 0; }",
-        "th { background-color: #3498DB; color: white; padding: 10px; text-align: left; }",
-        "td { padding: 8px; border-bottom: 1px solid #ddd; }",
+        "th { background-color: #3498DB; color: white; padding: 12px; text-align: left; }",
+        "td { padding: 10px; border-bottom: 1px solid #ddd; }",
+        "tr:nth-child(even) { background-color: #f9f9f9; }",
         "tr:hover { background-color: #f5f5f5; }",
-        ".highlight { background-color: #f39c12; padding: 10px; border-radius: 5px; }",
-        ".footer { margin-top: 50px; font-size: 12px; color: #7F8C8D; border-top: 1px solid #ddd; padding-top: 10px; }",
+        ".highlight { background-color: #FFEAA7; padding: 15px; border-radius: 5px; border-left: 5px solid #F39C12; }",
+        ".footer { margin-top: 50px; font-size: 12px; color: #7F8C8D; border-top: 2px solid #ddd; padding-top: 15px; text-align: center; }",
+        ".badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 12px; font-weight: bold; }",
+        ".badge-info { background-color: #74B3CE; color: white; }",
+        ".badge-structural { background-color: #2E86AB; color: white; }",
+        ".badge-normativo { background-color: #E84855; color: white; }",
+        ".badge-sistemico { background-color: #1A3A5C; color: white; }",
         "</style>",
         "</head>",
         "<body>",
         "<h1>📊 Reporte del MPCS</h1>",
-        "<p><b>Fecha de generación:</b> ", format(Sys.Date(), "%d de %B de %Y"), "</p>",
+        "<p><b>Fecha de generación:</b> ", format(Sys.Date(), "%d de %B de %Y"), " a las ", format(Sys.time(), "%H:%M"), "</p>",
         "<hr>",
-        "<h2>1. Resumen de resultados</h2>",
+        "<h2>📋 1. Resumen de resultados</h2>",
         "<p><b>Grupos analizados:</b> ", nrow(rv$results_df), "</p>",
         "<p><b>Total de observaciones:</b> ", sum(rv$results_df$n), "</p>",
         "<br>",
-        "<h2>2. Tabla de resultados</h2>",
+        "<h2>📊 2. Tabla de resultados</h2>",
         "<table>",
-        "<tr><th>Grupo</th><th>n</th><th>I_MPCS</th><th>Nodo óptimo</th><th>k</th><th>Tipo Nudge</th></tr>"
+        "<thead><tr><th>Grupo</th><th>n</th><th>I_MPCS</th><th>Nodo óptimo</th><th>k</th><th>Tipo Nudge</th></tr></thead>",
+        "<tbody>"
       )
       
-      # Añadir filas de la tabla
+      # --- Añadir filas de la tabla ---
       for (i in 1:nrow(rv$results_df)) {
         row <- rv$results_df[i, ]
-        highlight <- if (row$I_MPCS == max(rv$results_df$I_MPCS)) " style='background-color: #FFEAA7;'" else ""
-        html_content <- c(
-          html_content,
-          paste0("<tr", highlight, ">"),
-          paste0("<td>", row$Grupo, "</td>"),
+        is_top <- row$I_MPCS == max(rv$results_df$I_MPCS)
+        bg_color <- if (is_top) " style='background-color: #FFEAA7;'" else ""
+        html_lines <- c(
+          html_lines,
+          paste0("<tr", bg_color, ">"),
+          paste0("<td><b>", row$Grupo, if (is_top) " 🔴" else "", "</b></td>"),
           paste0("<td>", row$n, "</td>"),
           paste0("<td><b>", round(row$I_MPCS, 4), "</b></td>"),
           paste0("<td>", row$Nodo_Optimo, "</td>"),
@@ -635,58 +637,53 @@ server <- function(input, output, session) {
         )
       }
       
-      # Cerrar tabla
-      html_content <- c(html_content, "</table>")
+      html_lines <- c(html_lines, "</tbody></table>")
       
-      # Interpretación
+      # --- Interpretación ---
       top_group <- rv$results_df[which.max(rv$results_df$I_MPCS), ]
-      html_content <- c(
-        html_content,
-        "<h2>3. Interpretación de resultados</h2>",
+      bottom_group <- rv$results_df[which.min(rv$results_df$I_MPCS), ]
+      
+      html_lines <- c(
+        html_lines,
+        "<h2>💡 3. Interpretación de resultados</h2>",
         "<div class='highlight'>",
-        "<p><b>🔴 Grupo con mayor prioridad:</b> ", top_group$Grupo, 
-        " (I_MPCS = ", round(top_group$I_MPCS, 4), ")</p>",
-        "<p><b>🎯 Nodo óptimo de intervención:</b> ", top_group$Nodo_Optimo, "</p>",
-        "<p><b>💡 Recomendación:</b> Aplicar un nudge de tipo <b>", 
-        top_group$Tipo_Nudge, "</b> con intensidad <b>k = ", round(top_group$k, 4), "</b>.</p>",
+        "<p><b>🔴 Grupo con mayor prioridad de intervención:</b></p>",
+        "<ul>",
+        "<li><b>Grupo:</b> ", top_group$Grupo, "</li>",
+        "<li><b>Índice MPCS:</b> ", round(top_group$I_MPCS, 4), "</li>",
+        "<li><b>Nodo óptimo de intervención:</b> ", top_group$Nodo_Optimo, "</li>",
+        "<li><b>Intensidad recomendada (k):</b> ", round(top_group$k, 4), "</li>",
+        "<li><b>Tipo de nudge recomendado:</b> <b>", top_group$Tipo_Nudge, "</b></li>",
+        "</ul>",
         "</div>",
-        "<h2>4. Citación</h2>",
+        "<br>",
+        "<div style='background-color: #f0f0f0; padding: 15px; border-radius: 5px;'>",
+        "<p><b>🟢 Grupo con menor prioridad:</b> ", bottom_group$Grupo, 
+        " (I_MPCS = ", round(bottom_group$I_MPCS, 4), ")</p>",
+        "</div>",
+        "<h2>📝 4. Recomendaciones operativas</h2>",
+        "<p>Para el grupo prioritario (<b>", top_group$Grupo, "</b>), se recomienda:</p>",
+        "<ul>",
+        "<li>Aplicar un <b>nudge de tipo ", top_group$Tipo_Nudge, "</b></li>",
+        "<li>Con una intensidad de <b>k = ", round(top_group$k, 4), "</b></li>",
+        "<li>Focalizado en el nodo <b>", top_group$Nodo_Optimo, "</b></li>",
+        "</ul>",
+        "<h2>📚 5. Citación</h2>",
         "<p>MPCS: A Predictive Model of Systemic Behavioral Change... (Autor, año).</p>",
         "<div class='footer'>",
-        "<p>Reporte generado automáticamente por MPCS Calculator</p>",
-        "<p>Repositorio: <a href='https://github.com/Izela-meth/MPCS_APP'>https://github.com/Izela-meth/MPCS_APP</a></p>",
+        "<p>Reporte generado automáticamente por <b>MPCS Calculator</b></p>",
+        "<p>Repositorio: <a href='https://github.com/Izela-meth/MPCS_APP' target='_blank'>https://github.com/Izela-meth/MPCS_APP</a></p>",
         "</div>",
         "</body>",
         "</html>"
       )
       
-      # Escribir el HTML en un archivo temporal
-      writeLines(html_content, tempReport)
+      # --- Guardar el archivo HTML ---
+      writeLines(html_lines, file)
       
-      # Intentar convertir a PDF, si falla guardar como HTML
-      tryCatch({
-        # Intentar con pagedown (más confiable)
-        if (requireNamespace("pagedown", quietly = TRUE)) {
-          pagedown::chrome_print(tempReport, output = file)
-        } else {
-          # Alternativa: guardar como HTML
-          file.copy(tempReport, file, overwrite = TRUE)
-        }
-      }, error = function(e) {
-        # Si falla, guardar como HTML
-        warning("Error al generar PDF: ", e$message, ". Guardando como HTML.")
-        file.copy(tempReport, file, overwrite = TRUE)
-      })
-      
-      # Mensaje de éxito o advertencia
-      if (grepl("\\.pdf$", file) && file.exists(file)) {
-        showNotification("PDF generado correctamente.", type = "message")
-      } else {
-        showNotification("Se ha generado un archivo HTML.", type = "message")
-      }
+      showNotification("Reporte HTML generado correctamente.", type = "message")
     }
   )
-}
 
 # ============================================================================
 # EJECUTAR LA APLICACIÓN CON FOOTER AL FINAL
