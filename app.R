@@ -212,11 +212,11 @@ ui <- page_navbar(
       column(
         width = 6,
         wellPanel(
-          h4("Generar reporte PDF"),
-          p("El reporte incluye todos los resultados, gráficos y la interpretación."),
-          downloadButton("download_report", "Generar y descargar PDF", 
+          h4("Generar reporte"),
+          p("Descarga un reporte completo en formato HTML."),
+          downloadButton("download_report", "Descargar reporte HTML", 
                          class = "btn-danger w-100",
-                         icon = icon("file-pdf"))
+                         icon = icon("file-code"))
         )
       )
     )
@@ -271,19 +271,17 @@ server <- function(input, output, session) {
   })
   
   # ========================================================================
-  # CARGA DE DATOS DE DEMOSTRACIÓN (CORREGIDA)
+  # CARGA DE DATOS DE DEMOSTRACIÓN
   # ========================================================================
   observeEvent(input$load_demo, {
     showNotification("Cargando datos de demostración...", type = "message")
     
-    # Función para generar datos si no hay archivo
     generar_y_cargar_demo <- function() {
       datos_demo <- generar_demo_data(1000, 123)
       rv$data <- datos_demo
       showNotification("Datos de demostración generados exitosamente (n=1000).", type = "message")
     }
     
-    # Intentar cargar desde archivo
     if (file.exists("data/demo_data.csv")) {
       tryCatch({
         rv$data <- read.csv("data/demo_data.csv")
@@ -293,12 +291,10 @@ server <- function(input, output, session) {
         generar_y_cargar_demo()
       })
     } else {
-      # Si no existe el archivo, generar datos
       showNotification("No se encontró archivo. Generando datos de demostración...", type = "message")
       generar_y_cargar_demo()
     }
     
-    # Actualizar selectores
     vars <- names(rv$data)
     vars_num <- names(rv$data)[sapply(rv$data, is.numeric)]
     updateSelectInput(session, "graph_vars", choices = vars_num, selected = vars_num[1:min(5, length(vars_num))])
@@ -418,7 +414,7 @@ server <- function(input, output, session) {
   })
   
   # ========================================================================
-  # FUNCIONES PARA GRÁFICOS (MODERNIZADAS)
+  # FUNCIONES PARA GRÁFICOS
   # ========================================================================
   generate_plots <- function(data, graph_vars, markov_var, results, results_list, threshold) {
     p_graph <- NULL; p_states <- NULL; p_markov <- NULL; p_rank <- NULL
@@ -444,7 +440,6 @@ server <- function(input, output, session) {
         if (!"Group" %in% names(data)) data$Group <- "Global"
         plot_data <- data[!is.na(data$Group) & !is.na(data[[markov_var]]), ]
         if (nrow(plot_data) == 0) return(ggplot() + theme_void() + annotate("text", x = 0.5, y = 0.5, label = "No hay datos"))
-        # Modernizado: usando aes() en lugar de aes_string()
         ggplot(plot_data, aes(x = .data[["Group"]], fill = .data[[markov_var]])) + 
           geom_bar(position = "fill") +
           scale_fill_brewer(palette = "Set2") + theme_minimal() +
@@ -567,7 +562,15 @@ server <- function(input, output, session) {
   })
   
   # ========================================================================
-  # DESCARGA DE REPORTE (HTML ESTABLE)
+  # DESCARGAS
+  # ========================================================================
+  output$download_csv <- downloadHandler(
+    filename = function() { paste0("MPCS_Resultados_", Sys.Date(), ".csv") },
+    content = function(file) { req(rv$results_df); write.csv(rv$results_df, file, row.names = FALSE) }
+  )
+  
+  # ========================================================================
+  # DESCARGA DE REPORTE HTML (CORREGIDO)
   # ========================================================================
   output$download_report <- downloadHandler(
     filename = function() {
@@ -598,11 +601,6 @@ server <- function(input, output, session) {
         "tr:hover { background-color: #f5f5f5; }",
         ".highlight { background-color: #FFEAA7; padding: 15px; border-radius: 5px; border-left: 5px solid #F39C12; }",
         ".footer { margin-top: 50px; font-size: 12px; color: #7F8C8D; border-top: 2px solid #ddd; padding-top: 15px; text-align: center; }",
-        ".badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 12px; font-weight: bold; }",
-        ".badge-info { background-color: #74B3CE; color: white; }",
-        ".badge-structural { background-color: #2E86AB; color: white; }",
-        ".badge-normativo { background-color: #E84855; color: white; }",
-        ".badge-sistemico { background-color: #1A3A5C; color: white; }",
         "</style>",
         "</head>",
         "<body>",
@@ -624,10 +622,11 @@ server <- function(input, output, session) {
         row <- rv$results_df[i, ]
         is_top <- row$I_MPCS == max(rv$results_df$I_MPCS)
         bg_color <- if (is_top) " style='background-color: #FFEAA7;'" else ""
+        icono <- if (is_top) " 🔴" else ""
         html_lines <- c(
           html_lines,
           paste0("<tr", bg_color, ">"),
-          paste0("<td><b>", row$Grupo, if (is_top) " 🔴" else "", "</b></td>"),
+          paste0("<td><b>", row$Grupo, icono, "</b></td>"),
           paste0("<td>", row$n, "</td>"),
           paste0("<td><b>", round(row$I_MPCS, 4), "</b></td>"),
           paste0("<td>", row$Nodo_Optimo, "</td>"),
@@ -669,40 +668,4 @@ server <- function(input, output, session) {
         "<li>Focalizado en el nodo <b>", top_group$Nodo_Optimo, "</b></li>",
         "</ul>",
         "<h2>📚 5. Citación</h2>",
-        "<p>MPCS: A Predictive Model of Systemic Behavioral Change... (Autor, año).</p>",
-        "<div class='footer'>",
-        "<p>Reporte generado automáticamente por <b>MPCS Calculator</b></p>",
-        "<p>Repositorio: <a href='https://github.com/Izela-meth/MPCS_APP' target='_blank'>https://github.com/Izela-meth/MPCS_APP</a></p>",
-        "</div>",
-        "</body>",
-        "</html>"
-      )
-      
-      # --- Guardar el archivo HTML ---
-      writeLines(html_lines, file)
-      
-      showNotification("Reporte HTML generado correctamente.", type = "message")
-    }
-  )
-
-# ============================================================================
-# EJECUTAR LA APLICACIÓN CON FOOTER AL FINAL
-# ============================================================================
-
-# Crear la aplicación base
-app <- shinyApp(ui = ui, server = server)
-
-# Añadir el footer al final de la página
-app <- tagList(
-  app,
-  tags$footer(
-    class = "bg-light p-3 text-center small border-top mt-4",
-    tags$b("Citación:"), 
-    "MPCS: A Predictive Model of Systemic Behavioral Change... (Autor, año). ",
-    tags$a("DOI del artículo", href = "#"), " | ",
-    tags$a("Repositorio GitHub", href = "https://github.com/Izela-meth/MPCS_APP")
-  )
-)
-
-# Ejecutar la aplicación
-app
+        "<p>
