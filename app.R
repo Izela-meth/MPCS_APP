@@ -234,7 +234,28 @@ server <- function(input, output, session) {
     results_df = NULL,
     plots = NULL
   )
-  
+
+  # ============================================================================
+# EJECUTAR LA APLICACIÓN CON FOOTER AL FINAL
+# ============================================================================
+
+# Crear la aplicación base
+app <- shinyApp(ui = ui, server = server)
+
+# Añadir el footer al final de la página
+app <- tagList(
+  app,
+  tags$footer(
+    class = "bg-light p-3 text-center small border-top mt-4",
+    tags$b("Citación:"), 
+    "MPCS: A Predictive Model of Systemic Behavioral Change... (Autor, año). ",
+    tags$a("DOI del artículo", href = "#"), " | ",
+    tags$a("Repositorio GitHub", href = "https://github.com/Izela-meth/MPCS_APP")
+  )
+)
+
+# Ejecutar la aplicación
+app
   # ========================================================================
   # CARGA DE DATOS DE ARCHIVO
   # ========================================================================
