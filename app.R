@@ -220,17 +220,6 @@ ui <- page_navbar(
         )
       )
     )
-  ),
-  
-  # ============================================================================
-  # FOOTER (DENTRO DEL UI)
-  # ============================================================================
-  footer = tags$footer(
-    class = "bg-light p-3 text-center small border-top mt-4",
-    tags$b("Citación:"), 
-    "MPCS: A Predictive Model of Systemic Behavioral Change... (Autor, año). ",
-    tags$a("DOI del artículo", href = "#"), " | ",
-    tags$a("Repositorio GitHub", href = "https://github.com/Izela-meth/MPCS_APP")
   )
 )
 
@@ -795,7 +784,39 @@ server <- function(input, output, session) {
 }
 
 # ==============================================================================
-# EJECUTAR LA APLICACIÓN
+# EJECUTAR LA APLICACIÓN CON FOOTER EN EL UI
 # ==============================================================================
 
-shinyApp(ui = ui, server = server)
+# Modificar el UI para añadir el footer usando CSS
+ui <- tagList(
+  ui,
+  tags$style(HTML("
+    /* Forzar el footer al final de la página */
+    .navbar + .container-fluid {
+      min-height: calc(100vh - 200px);
+    }
+    .mpcs-footer {
+      background-color: #f8f9fa;
+      padding: 15px;
+      text-align: center;
+      border-top: 1px solid #dee2e6;
+      margin-top: 30px;
+      font-size: 14px;
+      color: #6c757d;
+      width: 100%;
+    }
+    .mpcs-footer a {
+      color: #2C3E50;
+      text-decoration: none;
+    }
+    .mpcs-footer a:hover {
+      text-decoration: underline;
+    }
+  "))
+)
+
+# Ahora creamos la aplicación con el footer en la UI
+shinyApp(
+  ui = ui,
+  server = server
+)
