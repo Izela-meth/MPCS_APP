@@ -28,7 +28,7 @@ if (!file.exists("data/demo_data.csv")) {
 }
 
 # ============================================================================
-# UI — INTERFAZ DE USUARIO (CON FOOTER CORREGIDO)
+# UI — INTERFAZ DE USUARIO
 # ============================================================================
 
 ui <- page_navbar(
@@ -222,6 +222,7 @@ ui <- page_navbar(
     )
   )
 )
+
 # ============================================================================
 # SERVER — LÓGICA DE LA APLICACIÓN
 # ============================================================================
@@ -234,28 +235,7 @@ server <- function(input, output, session) {
     results_df = NULL,
     plots = NULL
   )
-
-  # ============================================================================
-# EJECUTAR LA APLICACIÓN CON FOOTER AL FINAL
-# ============================================================================
-
-# Crear la aplicación base
-app <- shinyApp(ui = ui, server = server)
-
-# Añadir el footer al final de la página
-app <- tagList(
-  app,
-  tags$footer(
-    class = "bg-light p-3 text-center small border-top mt-4",
-    tags$b("Citación:"), 
-    "MPCS: A Predictive Model of Systemic Behavioral Change... (Autor, año). ",
-    tags$a("DOI del artículo", href = "#"), " | ",
-    tags$a("Repositorio GitHub", href = "https://github.com/Izela-meth/MPCS_APP")
-  )
-)
-
-# Ejecutar la aplicación
-app
+  
   # ========================================================================
   # CARGA DE DATOS DE ARCHIVO
   # ========================================================================
@@ -372,51 +352,19 @@ app
   })
   
   # ========================================================================
-  # EJECUTAR MPCS (CORREGIDO DEFINITIVO)
+  # EJECUTAR MPCS
   # ========================================================================
   observeEvent(input$run_mpcs, {
     req(rv$data)
-    
-    # Validación de variables
     if (is.null(input$graph_vars) || length(input$graph_vars) < 5) {
       showNotification("Seleccione al menos 5 variables.", type = "error")
-      output$validation_msg <- renderUI({ 
-        tags$div(class = "alert alert-danger mt-2", 
-                 icon("exclamation-triangle"), 
-                 " Seleccione al menos 5 variables.")
-      })
-      return()
-    }
-    output$validation_msg <- renderUI({ NULL })
-    
-    # Validación de la variable de Markov
-    if (is.null(input$markov_var) || input$markov_var == "") {
-      showNotification("Seleccione una variable de estados Markov.", type = "error")
-      output$validation_msg <- renderUI({ 
-        tags$div(class = "alert alert-danger mt-2", 
-                 icon("exclamation-triangle"), 
-                 " Seleccione una variable de estados Markov.")
-      })
-      return()
-    }
-    
-    # Validación de estados de Markov
-    estados <- rv$data[[input$markov_var]]
-    if (length(unique(na.omit(estados))) < 3) {
-      showNotification("La variable de Markov debe tener al menos 3 estados.", type = "error")
-      output$validation_msg <- renderUI({ 
-        tags$div(class = "alert alert-danger mt-2", 
-                 icon("exclamation-triangle"), 
-                 " La variable de Markov debe tener al menos 3 estados.")
-      })
+      output$validation_msg <- renderUI({ tags$div(class = "alert alert-danger mt-2", icon("exclamation-triangle"), " Seleccione al menos 5 variables.") })
       return()
     }
     output$validation_msg <- renderUI({ NULL })
     
     withProgress(message = 'Ejecutando MPCS...', value = 0, {
       data_analysis <- rv$data
-      
-      # Agrupación
       if (input$group_var == "Ninguno (Global)") {
         data_analysis$Group <- "Global"
         grupos <- "Global"
@@ -427,104 +375,50 @@ app
       }
       
       results_list <- list()
-      
       for (i in seq_along(grupos)) {
         g <- grupos[i]
         incProgress(1 / length(grupos), detail = paste("Procesando grupo:", g))
-        
         sub <- data_analysis[data_analysis$Group == g, ]
-        
         if (nrow(sub) < 30) {
           showNotification(paste("Grupo", g, "tiene menos de 30 observaciones. Saltando."), type = "message")
           next
         }
-        
-        # 1. Grafo
         graph_data <- sub[, input$graph_vars, drop = FALSE]
         graph_res <- calcular_grafo(graph_data, input$graph_vars, input$threshold)
-        
-        # Si no hay grafo, usar valores por defecto
-        if (is.null(graph_res$graph) || vcount(graph_res$graph) < 2) {
-          showNotification(paste("Grupo", g, "no tiene suficientes conexiones en el grafo. Usando valor por defecto."), type = "message")
-          graph_res$score <- 0.5
-          graph_res$optimal_node <- "Sin nodo"
-          graph_res$graph <- NULL
-        }
-        
-        # 2. Markov
         markov_res <- calcular_markov(sub[[input$markov_var]], umbral_objetivo = 0.50)
-        
-        # 3. Juegos
         games_res <- calcular_juegos(markov_res$mat, input$R_factor)
-        
-        # 4. Índice MPCS
-        index_res <- calcular_indice(
-          I_grafo = graph_res$score,
-          I_markov = markov_res$score,
-          I_juegos = games_res$score,
-          w1 = input$w1,
-          w2 = input$w2,
-          w3 = input$w3,
-          R_factor = input$R_factor
-        )
+        index_res <- calcular_indice(graph_res$score, markov_res$score, games_res$score, input$w1, input$w2, input$w3, input$R_factor)
         
         results_list[[as.character(g)]] <- list(
-          grupo = g,
-          n = nrow(sub),
-          nodo_optimo = ifelse(is.null(graph_res$optimal_node), "Sin nodo", graph_res$optimal_node),
-          I_grafo = graph_res$score,
-          I_markov = markov_res$score,
-          I_juegos = games_res$score,
-          I_MPCS = index_res$I_MPCS,
-          k = index_res$k,
-          tipo = index_res$nudge_type,
-          graph = graph_res$graph,
-          graph_data = graph_data,
-          markov_mat = markov_res$mat,
-          sim_base = markov_res$sim_base,
-          dist_actual = markov_res$dist_actual,
-          T_base = markov_res$T_base
+          grupo = g, n = nrow(sub), nodo_optimo = graph_res$optimal_node,
+          I_grafo = graph_res$score, I_markov = markov_res$score, I_juegos = games_res$score,
+          I_MPCS = index_res$I_MPCS, k = index_res$k, tipo = index_res$nudge_type,
+          graph = graph_res$graph, graph_data = graph_data,
+          markov_mat = markov_res$mat, sim_base = markov_res$sim_base,
+          dist_actual = markov_res$dist_actual, T_base = markov_res$T_base
         )
       }
       
       if (length(results_list) == 0) {
-        showNotification("No se pudo procesar ningún grupo. Verifique que al menos un grupo tenga >30 observaciones.", type = "error")
+        showNotification("No se pudo procesar ningún grupo.", type = "error")
         return()
       }
       
       rv$results <- results_list
-      
-      # Generar tabla de resultados
       results_df <- do.call(rbind, lapply(results_list, function(r) {
-        data.frame(
-          Grupo = r$grupo,
-          n = r$n,
-          I_MPCS = round(r$I_MPCS, 4),
-          Nodo_Optimo = r$nodo_optimo,
-          k = round(r$k, 4),
-          Tipo_Nudge = r$tipo,
-          stringsAsFactors = FALSE
-        )
+        data.frame(Grupo = r$grupo, n = r$n, I_MPCS = round(r$I_MPCS, 4),
+                   Nodo_Optimo = r$nodo_optimo, k = round(r$k, 4),
+                   Tipo_Nudge = r$tipo, stringsAsFactors = FALSE)
       }))
-      
       rv$results_df <- results_df
       
-      # Generar gráficos
-      rv$plots <- generate_plots(
-        data = data_analysis,
-        graph_vars = input$graph_vars,
-        markov_var = input$markov_var,
-        results = results_df,
-        results_list = results_list,
-        threshold = input$threshold
-      )
-      
-      showNotification(paste("MPCS ejecutado correctamente para", nrow(results_df), "grupos."), type = "message")
+      rv$plots <- generate_plots(data_analysis, input$graph_vars, input$markov_var, results_df, results_list, input$threshold)
+      showNotification(paste("MPCS ejecutado correctamente para", nrow(results_df), "grupos"), type = "message")
     })
   })
   
   # ========================================================================
-  # FUNCIONES PARA GRÁFICOS
+  # FUNCIONES PARA GRÁFICOS (MODERNIZADAS)
   # ========================================================================
   generate_plots <- function(data, graph_vars, markov_var, results, results_list, threshold) {
     p_graph <- NULL; p_states <- NULL; p_markov <- NULL; p_rank <- NULL
@@ -550,7 +444,9 @@ app
         if (!"Group" %in% names(data)) data$Group <- "Global"
         plot_data <- data[!is.na(data$Group) & !is.na(data[[markov_var]]), ]
         if (nrow(plot_data) == 0) return(ggplot() + theme_void() + annotate("text", x = 0.5, y = 0.5, label = "No hay datos"))
-        ggplot(plot_data, aes_string(x = "Group", fill = markov_var)) + geom_bar(position = "fill") +
+        # Modernizado: usando aes() en lugar de aes_string()
+        ggplot(plot_data, aes(x = .data[["Group"]], fill = .data[[markov_var]])) + 
+          geom_bar(position = "fill") +
           scale_fill_brewer(palette = "Set2") + theme_minimal() +
           labs(x = "Grupo", y = "Proporción", fill = "Estado") +
           theme(axis.text.x = element_text(angle = 45, hjust = 1))
@@ -595,7 +491,7 @@ app
           df <- data.frame(Tiempo = c(t, t), Adherencia = c(adh_base, adh_nudge),
                            Escenario = rep(c("Sin nudge", "Con nudge"), each = length(t)))
           return(ggplot(df, aes(x = Tiempo, y = Adherencia, color = Escenario)) +
-                   geom_line(size = 1.2) + geom_hline(yintercept = 0.50, linetype = "dashed", color = "gray50") +
+                   geom_line(linewidth = 1.2) + geom_hline(yintercept = 0.50, linetype = "dashed", color = "gray50") +
                    scale_y_continuous(labels = scales::percent) + theme_minimal(base_size = 12) +
                    scale_color_manual(values = c("Sin nudge" = "#E74C3C", "Con nudge" = "#2ECC71")) +
                    labs(x = "Período", y = "P(Adherencia ≥ 50%)") + theme(legend.position = "bottom"))
@@ -605,7 +501,7 @@ app
       df <- data.frame(Tiempo = t, Sin_Nudge = pnorm(t, mean = 8, sd = 3), Con_Nudge = pnorm(t, mean = 6, sd = 2.5)) %>%
         pivot_longer(-Tiempo, names_to = "Escenario", values_to = "Prob_Adherencia")
       ggplot(df, aes(x = Tiempo, y = Prob_Adherencia, color = Escenario)) +
-        geom_line(size = 1.2) + geom_hline(yintercept = 0.50, linetype = "dashed", color = "gray50") +
+        geom_line(linewidth = 1.2) + geom_hline(yintercept = 0.50, linetype = "dashed", color = "gray50") +
         scale_y_continuous(labels = scales::percent) + theme_minimal(base_size = 12) +
         scale_color_manual(values = c("Sin_Nudge" = "#E74C3C", "Con_Nudge" = "#2ECC71")) +
         labs(x = "Período", y = "P(Adherencia ≥ 50%)") + theme(legend.position = "bottom")
@@ -681,35 +577,135 @@ app
   output$download_report <- downloadHandler(
     filename = function() { paste0("MPCS_Reporte_", Sys.Date(), ".pdf") },
     content = function(file) {
-      tempReport <- file.path(tempdir(), "reporte_mpcs.Rmd")
-      reporte_content <- c(
-        "---", "title: 'Reporte MPCS'", "author: 'MPCS Calculator'",
-        "date: '", format(Sys.Date(), "%d de %B de %Y"), "'",
-        "output: pdf_document", "---", "",
-        "# Reporte del Modelo Predictivo de Cambio Conductual por Sistemas (MPCS)",
-        "", "## Resumen de resultados", "",
-        "```{r echo=FALSE}", "knitr::kable(results_df, caption = 'Resultados del MPCS', digits = 4)", "```",
-        "", "## Interpretación", "",
-        "El grupo con mayor prioridad de intervención es **", 
-        ifelse(!is.null(rv$results_df), rv$results_df$Grupo[which.max(rv$results_df$I_MPCS)], "N/A"), 
-        "** con un Índice MPCS de **", 
-        ifelse(!is.null(rv$results_df), round(max(rv$results_df$I_MPCS), 4), "N/A"), "**.",
-        "", "Se recomienda aplicar un nudge de tipo **", 
-        ifelse(!is.null(rv$results_df), rv$results_df$Tipo_Nudge[which.max(rv$results_df$I_MPCS)], "N/A"), 
-        "** en el nodo **", 
-        ifelse(!is.null(rv$results_df), rv$results_df$Nodo_Optimo[which.max(rv$results_df$I_MPCS)], "N/A"), "**.",
-        "", "## Citación", "",
-        "MPCS: A Predictive Model of Systemic Behavioral Change... (Autor, año)."
+      # Verificar que hay resultados
+      if (is.null(rv$results_df) || nrow(rv$results_df) == 0) {
+        showNotification("No hay resultados para generar el reporte.", type = "error")
+        return()
+      }
+      
+      # Crear un reporte temporal en HTML (más estable que PDF directamente)
+      tempReport <- file.path(tempdir(), "reporte_mpcs.html")
+      
+      # Contenido del reporte en HTML
+      html_content <- c(
+        "<!DOCTYPE html>",
+        "<html>",
+        "<head>",
+        "<meta charset='UTF-8'>",
+        "<title>Reporte MPCS</title>",
+        "<style>",
+        "body { font-family: Arial, sans-serif; margin: 40px; }",
+        "h1 { color: #2C3E50; }",
+        "h2 { color: #34495E; border-bottom: 2px solid #3498DB; padding-bottom: 5px; }",
+        "table { border-collapse: collapse; width: 100%; margin: 20px 0; }",
+        "th { background-color: #3498DB; color: white; padding: 10px; text-align: left; }",
+        "td { padding: 8px; border-bottom: 1px solid #ddd; }",
+        "tr:hover { background-color: #f5f5f5; }",
+        ".highlight { background-color: #f39c12; padding: 10px; border-radius: 5px; }",
+        ".footer { margin-top: 50px; font-size: 12px; color: #7F8C8D; border-top: 1px solid #ddd; padding-top: 10px; }",
+        "</style>",
+        "</head>",
+        "<body>",
+        "<h1>📊 Reporte del MPCS</h1>",
+        "<p><b>Fecha de generación:</b> ", format(Sys.Date(), "%d de %B de %Y"), "</p>",
+        "<hr>",
+        "<h2>1. Resumen de resultados</h2>",
+        "<p><b>Grupos analizados:</b> ", nrow(rv$results_df), "</p>",
+        "<p><b>Total de observaciones:</b> ", sum(rv$results_df$n), "</p>",
+        "<br>",
+        "<h2>2. Tabla de resultados</h2>",
+        "<table>",
+        "<tr><th>Grupo</th><th>n</th><th>I_MPCS</th><th>Nodo óptimo</th><th>k</th><th>Tipo Nudge</th></tr>"
       )
-      writeLines(reporte_content, tempReport)
-      rmarkdown::render(tempReport, output_file = file, params = list(results_df = rv$results_df), envir = new.env(parent = globalenv()))
+      
+      # Añadir filas de la tabla
+      for (i in 1:nrow(rv$results_df)) {
+        row <- rv$results_df[i, ]
+        highlight <- if (row$I_MPCS == max(rv$results_df$I_MPCS)) " style='background-color: #FFEAA7;'" else ""
+        html_content <- c(
+          html_content,
+          paste0("<tr", highlight, ">"),
+          paste0("<td>", row$Grupo, "</td>"),
+          paste0("<td>", row$n, "</td>"),
+          paste0("<td><b>", round(row$I_MPCS, 4), "</b></td>"),
+          paste0("<td>", row$Nodo_Optimo, "</td>"),
+          paste0("<td>", round(row$k, 4), "</td>"),
+          paste0("<td>", row$Tipo_Nudge, "</td>"),
+          "</tr>"
+        )
+      }
+      
+      # Cerrar tabla
+      html_content <- c(html_content, "</table>")
+      
+      # Interpretación
+      top_group <- rv$results_df[which.max(rv$results_df$I_MPCS), ]
+      html_content <- c(
+        html_content,
+        "<h2>3. Interpretación de resultados</h2>",
+        "<div class='highlight'>",
+        "<p><b>🔴 Grupo con mayor prioridad:</b> ", top_group$Grupo, 
+        " (I_MPCS = ", round(top_group$I_MPCS, 4), ")</p>",
+        "<p><b>🎯 Nodo óptimo de intervención:</b> ", top_group$Nodo_Optimo, "</p>",
+        "<p><b>💡 Recomendación:</b> Aplicar un nudge de tipo <b>", 
+        top_group$Tipo_Nudge, "</b> con intensidad <b>k = ", round(top_group$k, 4), "</b>.</p>",
+        "</div>",
+        "<h2>4. Citación</h2>",
+        "<p>MPCS: A Predictive Model of Systemic Behavioral Change... (Autor, año).</p>",
+        "<div class='footer'>",
+        "<p>Reporte generado automáticamente por MPCS Calculator</p>",
+        "<p>Repositorio: <a href='https://github.com/Izela-meth/MPCS_APP'>https://github.com/Izela-meth/MPCS_APP</a></p>",
+        "</div>",
+        "</body>",
+        "</html>"
+      )
+      
+      # Escribir el HTML en un archivo temporal
+      writeLines(html_content, tempReport)
+      
+      # Intentar convertir a PDF, si falla guardar como HTML
+      tryCatch({
+        # Intentar con pagedown (más confiable)
+        if (requireNamespace("pagedown", quietly = TRUE)) {
+          pagedown::chrome_print(tempReport, output = file)
+        } else {
+          # Alternativa: guardar como HTML
+          file.copy(tempReport, file, overwrite = TRUE)
+        }
+      }, error = function(e) {
+        # Si falla, guardar como HTML
+        warning("Error al generar PDF: ", e$message, ". Guardando como HTML.")
+        file.copy(tempReport, file, overwrite = TRUE)
+      })
+      
+      # Mensaje de éxito o advertencia
+      if (grepl("\\.pdf$", file) && file.exists(file)) {
+        showNotification("PDF generado correctamente.", type = "message")
+      } else {
+        showNotification("Se ha generado un archivo HTML.", type = "message")
+      }
     }
   )
 }
 
 # ============================================================================
-# EJECUTAR LA APLICACIÓN
+# EJECUTAR LA APLICACIÓN CON FOOTER AL FINAL
 # ============================================================================
 
-# Esta línea SIEMPRE se ejecuta, en RStudio y en Render
-shinyApp(ui = ui, server = server)
+# Crear la aplicación base
+app <- shinyApp(ui = ui, server = server)
+
+# Añadir el footer al final de la página
+app <- tagList(
+  app,
+  tags$footer(
+    class = "bg-light p-3 text-center small border-top mt-4",
+    tags$b("Citación:"), 
+    "MPCS: A Predictive Model of Systemic Behavioral Change... (Autor, año). ",
+    tags$a("DOI del artículo", href = "#"), " | ",
+    tags$a("Repositorio GitHub", href = "https://github.com/Izela-meth/MPCS_APP")
+  )
+)
+
+# Ejecutar la aplicación
+app
