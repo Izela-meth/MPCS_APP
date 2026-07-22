@@ -668,4 +668,38 @@ server <- function(input, output, session) {
         "<li>Focalizado en el nodo <b>", top_group$Nodo_Optimo, "</b></li>",
         "</ul>",
         "<h2>📚 5. Citación</h2>",
-        "<p>
+        "<p>MPCS: A Predictive Model of Systemic Behavioral Change... (Autor, año).</p>",
+        "<div class='footer'>",
+        "<p>Reporte generado automáticamente por <b>MPCS Calculator</b></p>",
+        "<p>Repositorio: <a href='https://github.com/Izela-meth/MPCS_APP' target='_blank'>https://github.com/Izela-meth/MPCS_APP</a></p>",
+        "</div>",
+        "</body>",
+        "</html>"
+      )
+      
+      # --- Guardar el archivo HTML ---
+      writeLines(html_lines, file)
+      
+      showNotification("Reporte HTML generado correctamente.", type = "message")
+    }
+  )
+}
+
+# ============================================================================
+# EJECUTAR LA APLICACIÓN CON FOOTER
+# ============================================================================
+
+app <- shinyApp(ui = ui, server = server)
+
+app <- tagList(
+  app,
+  tags$footer(
+    class = "bg-light p-3 text-center small border-top mt-4",
+    tags$b("Citación:"), 
+    "MPCS: A Predictive Model of Systemic Behavioral Change... (Autor, año). ",
+    tags$a("DOI del artículo", href = "#"), " | ",
+    tags$a("Repositorio GitHub", href = "https://github.com/Izela-meth/MPCS_APP")
+  )
+)
+
+app
