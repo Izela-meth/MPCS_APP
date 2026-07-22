@@ -119,7 +119,24 @@ ui <- page_navbar(
           hr(),
           sliderInput("R_factor", "Factor de recursos (R)",
                       min = 0, max = 1, value = 0.65, step = 0.05,
-                      post = tags$span("  (mayor = más recursos disponibles)"))
+                      post = tags$span("  (mayor = más recursos disponibles)")),
+          div(
+            class = "alert alert-info mt-2",
+            style = "font-size: 0.85em;",
+            icon("circle-info"),
+            HTML(
+              "<b>Nota metodológica.</b> El factor <i>R</i> afecta <u>únicamente</u>
+              la intensidad recomendada del nudge, k = mín(1, I_MPCS &times; R &times; 1.5).
+              No modifica la masa crítica p* del módulo de Teoría de Juegos
+              (I_Juegos = p* = 0.50, fijo por diseño del modelo, Sección 3.5.3
+              del artículo). Además, esta calculadora estima la matriz de transición
+              de Markov con supuestos genéricos por posición del estado, útiles para
+              exploración rápida con cualquier dataset; los resultados del caso de
+              estudio (ENDES 2024, seis regiones) fueron producidos con el script de
+              aplicación específica (Material Suplementario), que calibra la matriz
+              con tasas de transición empíricas."
+            )
+          )
         )
       )
     ),
