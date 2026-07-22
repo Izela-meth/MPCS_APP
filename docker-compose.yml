@@ -1,0 +1,41 @@
+# ============================================================================
+# docker-compose.yml — Para desarrollo local con Docker Compose
+# ============================================================================
+# Uso:
+#   docker-compose up -d      # Levantar en segundo plano
+#   docker-compose down       # Detener
+#   docker-compose logs -f    # Ver logs
+# ============================================================================
+
+version: '3.8'
+
+services:
+  mpcs-calculator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mpcs-calculator
+    ports:
+      - "7860:7860"
+    volumes:
+      # Montar código local para desarrollo (hot-reload)
+      - ./app.R:/srv/shiny-server/app.R
+      - ./functions:/srv/shiny-server/functions
+      - ./data:/srv/shiny-server/data
+    environment:
+      - PORT=7860
+      - SHINY_PORT=7860
+      - R_CONFIG_ACTIVE=development
+      - TZ=America/Lima
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7860"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - mpcs-network
+
+networks:
+  mpcs-network:
+    driver: bridge
