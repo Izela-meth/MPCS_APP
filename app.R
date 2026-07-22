@@ -580,5 +580,11 @@ server <- function(input, output, session) {
 # EJECUTAR LA APLICACIÓN
 # ============================================================================
 
-# Devuelve el objeto de la aplicación Shiny para que Render lo ejecute
+# Opción 1: Si el archivo se ejecuta en un entorno interactivo (RStudio)
+if (interactive()) {
+  shinyApp(ui = ui, server = server)
+}
+
+# Opción 2: Para entornos no interactivos (Render, servidores, etc.)
+# Esto garantiza que el objeto de la aplicación siempre sea devuelto
 shinyApp(ui = ui, server = server)
