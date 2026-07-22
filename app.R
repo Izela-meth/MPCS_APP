@@ -244,7 +244,9 @@ server <- function(input, output, session) {
     plots = NULL
   )
   
-  # --- Carga de datos ---
+  # ========================================================================
+  # CARGA DE DATOS DE ARCHIVO
+  # ========================================================================
   observeEvent(input$file, {
     req(input$file)
     ext <- tools::file_ext(input$file$datapath)
@@ -267,7 +269,7 @@ server <- function(input, output, session) {
     }
     
     rv$data <- datos
-    showNotification(paste("Datos cargados:", nrow(datos), "filas,", ncol(datos), "columnas"), type = "success")
+    showNotification(paste("Datos cargados:", nrow(datos), "filas,", ncol(datos), "columnas"), type = "message")
     
     vars <- names(datos)
     vars_num <- names(datos)[sapply(datos, is.numeric)]
@@ -277,7 +279,7 @@ server <- function(input, output, session) {
   })
   
   # ========================================================================
-  # CARGA DE DATOS DE DEMOSTRACIÓN (VERSIÓN DEFINITIVA Y CORREGIDA)
+  # CARGA DE DATOS DE DEMOSTRACIÓN (CORREGIDA)
   # ========================================================================
   observeEvent(input$load_demo, {
     showNotification("Cargando datos de demostración...", type = "message")
@@ -304,19 +306,17 @@ server <- function(input, output, session) {
       generar_y_cargar_demo()
     }
     
-    # Actualizar selectores con los datos cargados
+    # Actualizar selectores
     vars <- names(rv$data)
     vars_num <- names(rv$data)[sapply(rv$data, is.numeric)]
-    updateSelectInput(session, "graph_vars", choices = vars_num, 
-                      selected = vars_num[1:min(5, length(vars_num))])
-    updateSelectInput(session, "markov_var", choices = vars, 
-                      selected = "Estado_Markov")
-    updateSelectInput(session, "group_var", 
-                      choices = c("Ninguno (Global)", vars), 
-                      selected = "Region")
+    updateSelectInput(session, "graph_vars", choices = vars_num, selected = vars_num[1:min(5, length(vars_num))])
+    updateSelectInput(session, "markov_var", choices = vars, selected = "Estado_Markov")
+    updateSelectInput(session, "group_var", choices = c("Ninguno (Global)", vars), selected = "Region")
   })
   
-  # --- Vista previa ---
+  # ========================================================================
+  # SALIDAS DE VISTA PREVIA
+  # ========================================================================
   output$data_preview <- renderDT({
     req(rv$data)
     datatable(head(rv$data, 10), options = list(scrollX = TRUE, dom = 't', pageLength = 10), rownames = FALSE)
@@ -330,7 +330,9 @@ server <- function(input, output, session) {
     print(table(sapply(rv$data, class)))
   })
   
-  # --- UI dinámica ---
+  # ========================================================================
+  # UI DINÁMICA
+  # ========================================================================
   output$graph_vars_ui <- renderUI({
     req(rv$data)
     vars_num <- names(rv$data)[sapply(rv$data, is.numeric)]
@@ -357,18 +359,52 @@ server <- function(input, output, session) {
     if (abs(total - 1) < 0.01) paste0(total, " ✅") else paste0(total, " ⚠️ (debe sumar 1)")
   })
   
-  # --- Ejecutar MPCS ---
+  # ========================================================================
+  # EJECUTAR MPCS (CORREGIDO DEFINITIVO)
+  # ========================================================================
   observeEvent(input$run_mpcs, {
     req(rv$data)
+    
+    # Validación de variables
     if (is.null(input$graph_vars) || length(input$graph_vars) < 5) {
       showNotification("Seleccione al menos 5 variables.", type = "error")
-      output$validation_msg <- renderUI({ tags$div(class = "alert alert-danger mt-2", icon("exclamation-triangle"), " Seleccione al menos 5 variables.") })
+      output$validation_msg <- renderUI({ 
+        tags$div(class = "alert alert-danger mt-2", 
+                 icon("exclamation-triangle"), 
+                 " Seleccione al menos 5 variables.")
+      })
+      return()
+    }
+    output$validation_msg <- renderUI({ NULL })
+    
+    # Validación de la variable de Markov
+    if (is.null(input$markov_var) || input$markov_var == "") {
+      showNotification("Seleccione una variable de estados Markov.", type = "error")
+      output$validation_msg <- renderUI({ 
+        tags$div(class = "alert alert-danger mt-2", 
+                 icon("exclamation-triangle"), 
+                 " Seleccione una variable de estados Markov.")
+      })
+      return()
+    }
+    
+    # Validación de estados de Markov
+    estados <- rv$data[[input$markov_var]]
+    if (length(unique(na.omit(estados))) < 3) {
+      showNotification("La variable de Markov debe tener al menos 3 estados.", type = "error")
+      output$validation_msg <- renderUI({ 
+        tags$div(class = "alert alert-danger mt-2", 
+                 icon("exclamation-triangle"), 
+                 " La variable de Markov debe tener al menos 3 estados.")
+      })
       return()
     }
     output$validation_msg <- renderUI({ NULL })
     
     withProgress(message = 'Ejecutando MPCS...', value = 0, {
       data_analysis <- rv$data
+      
+      # Agrupación
       if (input$group_var == "Ninguno (Global)") {
         data_analysis$Group <- "Global"
         grupos <- "Global"
@@ -379,49 +415,105 @@ server <- function(input, output, session) {
       }
       
       results_list <- list()
+      
       for (i in seq_along(grupos)) {
         g <- grupos[i]
         incProgress(1 / length(grupos), detail = paste("Procesando grupo:", g))
+        
         sub <- data_analysis[data_analysis$Group == g, ]
+        
         if (nrow(sub) < 30) {
-          showNotification(paste("Grupo", g, "tiene menos de 30 observaciones. Saltando."), type = "warning")
+          showNotification(paste("Grupo", g, "tiene menos de 30 observaciones. Saltando."), type = "message")
           next
         }
+        
+        # 1. Grafo
         graph_data <- sub[, input$graph_vars, drop = FALSE]
         graph_res <- calcular_grafo(graph_data, input$graph_vars, input$threshold)
+        
+        # Si no hay grafo, usar valores por defecto
+        if (is.null(graph_res$graph) || vcount(graph_res$graph) < 2) {
+          showNotification(paste("Grupo", g, "no tiene suficientes conexiones en el grafo. Usando valor por defecto."), type = "message")
+          graph_res$score <- 0.5
+          graph_res$optimal_node <- "Sin nodo"
+          graph_res$graph <- NULL
+        }
+        
+        # 2. Markov
         markov_res <- calcular_markov(sub[[input$markov_var]], umbral_objetivo = 0.50)
+        
+        # 3. Juegos
         games_res <- calcular_juegos(markov_res$mat, input$R_factor)
-        index_res <- calcular_indice(graph_res$score, markov_res$score, games_res$score, input$w1, input$w2, input$w3, input$R_factor)
+        
+        # 4. Índice MPCS
+        index_res <- calcular_indice(
+          I_grafo = graph_res$score,
+          I_markov = markov_res$score,
+          I_juegos = games_res$score,
+          w1 = input$w1,
+          w2 = input$w2,
+          w3 = input$w3,
+          R_factor = input$R_factor
+        )
         
         results_list[[as.character(g)]] <- list(
-          grupo = g, n = nrow(sub), nodo_optimo = graph_res$optimal_node,
-          I_grafo = graph_res$score, I_markov = markov_res$score, I_juegos = games_res$score,
-          I_MPCS = index_res$I_MPCS, k = index_res$k, tipo = index_res$nudge_type,
-          graph = graph_res$graph, graph_data = graph_data,
-          markov_mat = markov_res$mat, sim_base = markov_res$sim_base,
-          dist_actual = markov_res$dist_actual, T_base = markov_res$T_base
+          grupo = g,
+          n = nrow(sub),
+          nodo_optimo = ifelse(is.null(graph_res$optimal_node), "Sin nodo", graph_res$optimal_node),
+          I_grafo = graph_res$score,
+          I_markov = markov_res$score,
+          I_juegos = games_res$score,
+          I_MPCS = index_res$I_MPCS,
+          k = index_res$k,
+          tipo = index_res$nudge_type,
+          graph = graph_res$graph,
+          graph_data = graph_data,
+          markov_mat = markov_res$mat,
+          sim_base = markov_res$sim_base,
+          dist_actual = markov_res$dist_actual,
+          T_base = markov_res$T_base
         )
       }
       
       if (length(results_list) == 0) {
-        showNotification("No se pudo procesar ningún grupo.", type = "error")
+        showNotification("No se pudo procesar ningún grupo. Verifique que al menos un grupo tenga >30 observaciones.", type = "error")
         return()
       }
       
       rv$results <- results_list
+      
+      # Generar tabla de resultados
       results_df <- do.call(rbind, lapply(results_list, function(r) {
-        data.frame(Grupo = r$grupo, n = r$n, I_MPCS = round(r$I_MPCS, 4),
-                   Nodo_Optimo = r$nodo_optimo, k = round(r$k, 4),
-                   Tipo_Nudge = r$tipo, stringsAsFactors = FALSE)
+        data.frame(
+          Grupo = r$grupo,
+          n = r$n,
+          I_MPCS = round(r$I_MPCS, 4),
+          Nodo_Optimo = r$nodo_optimo,
+          k = round(r$k, 4),
+          Tipo_Nudge = r$tipo,
+          stringsAsFactors = FALSE
+        )
       }))
+      
       rv$results_df <- results_df
       
-      rv$plots <- generate_plots(data_analysis, input$graph_vars, input$markov_var, results_df, results_list, input$threshold)
-      showNotification(paste("MPCS ejecutado correctamente para", nrow(results_df), "grupos"), type = "success")
+      # Generar gráficos
+      rv$plots <- generate_plots(
+        data = data_analysis,
+        graph_vars = input$graph_vars,
+        markov_var = input$markov_var,
+        results = results_df,
+        results_list = results_list,
+        threshold = input$threshold
+      )
+      
+      showNotification(paste("MPCS ejecutado correctamente para", nrow(results_df), "grupos."), type = "message")
     })
   })
   
-  # --- Funciones para gráficos ---
+  # ========================================================================
+  # FUNCIONES PARA GRÁFICOS
+  # ========================================================================
   generate_plots <- function(data, graph_vars, markov_var, results, results_list, threshold) {
     p_graph <- NULL; p_states <- NULL; p_markov <- NULL; p_rank <- NULL
     if (is.null(data) || nrow(data) == 0 || is.null(results) || nrow(results) == 0) {
@@ -510,7 +602,9 @@ server <- function(input, output, session) {
     return(list(graph = p_graph, states = p_states, markov = p_markov, rank = p_rank))
   }
   
-  # --- Salidas de resultados ---
+  # ========================================================================
+  # SALIDAS DE RESULTADOS
+  # ========================================================================
   output$results_table <- renderDT({
     req(rv$results_df)
     datatable(rv$results_df, options = list(scrollX = TRUE, pageLength = 10), rownames = FALSE) %>%
@@ -564,7 +658,9 @@ server <- function(input, output, session) {
     ))
   })
   
-  # --- Descargas ---
+  # ========================================================================
+  # DESCARGAS
+  # ========================================================================
   output$download_csv <- downloadHandler(
     filename = function() { paste0("MPCS_Resultados_", Sys.Date(), ".csv") },
     content = function(file) { req(rv$results_df); write.csv(rv$results_df, file, row.names = FALSE) }
@@ -603,11 +699,5 @@ server <- function(input, output, session) {
 # EJECUTAR LA APLICACIÓN
 # ============================================================================
 
-# Opción 1: Si el archivo se ejecuta en un entorno interactivo (RStudio)
-if (interactive()) {
-  shinyApp(ui = ui, server = server)
-}
-
-# Opción 2: Para entornos no interactivos (Render, servidores, etc.)
-# Esto garantiza que el objeto de la aplicación siempre sea devuelto
+# Esta línea SIEMPRE se ejecuta, en RStudio y en Render
 shinyApp(ui = ui, server = server)
