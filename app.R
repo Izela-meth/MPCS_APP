@@ -569,26 +569,18 @@ server <- function(input, output, session) {
     content = function(file) { req(rv$results_df); write.csv(rv$results_df, file, row.names = FALSE) }
   )
   
-  # ========================================================================
-  # DESCARGA DE REPORTE HTML (CORREGIDO)
-  # ========================================================================
   output$download_report <- downloadHandler(
     filename = function() {
       paste0("MPCS_Reporte_", Sys.Date(), ".html")
     },
     content = function(file) {
-      # Verificar que hay resultados
       if (is.null(rv$results_df) || nrow(rv$results_df) == 0) {
         showNotification("No hay resultados para generar el reporte.", type = "error")
         return()
       }
       
-      # --- Generar el HTML del reporte ---
       html_lines <- c(
-        "<!DOCTYPE html>",
-        "<html>",
-        "<head>",
-        "<meta charset='UTF-8'>",
+        "<!DOCTYPE html>", "<html>", "<head>", "<meta charset='UTF-8'>",
         "<title>Reporte MPCS</title>",
         "<style>",
         "body { font-family: Arial, sans-serif; margin: 40px; max-width: 1000px; margin-left: auto; margin-right: auto; }",
@@ -601,9 +593,7 @@ server <- function(input, output, session) {
         "tr:hover { background-color: #f5f5f5; }",
         ".highlight { background-color: #FFEAA7; padding: 15px; border-radius: 5px; border-left: 5px solid #F39C12; }",
         ".footer { margin-top: 50px; font-size: 12px; color: #7F8C8D; border-top: 2px solid #ddd; padding-top: 15px; text-align: center; }",
-        "</style>",
-        "</head>",
-        "<body>",
+        "</style>", "</head>", "<body>",
         "<h1>📊 Reporte del MPCS</h1>",
         "<p><b>Fecha de generación:</b> ", format(Sys.Date(), "%d de %B de %Y"), " a las ", format(Sys.time(), "%H:%M"), "</p>",
         "<hr>",
@@ -617,7 +607,6 @@ server <- function(input, output, session) {
         "<tbody>"
       )
       
-      # --- Añadir filas de la tabla ---
       for (i in 1:nrow(rv$results_df)) {
         row <- rv$results_df[i, ]
         is_top <- row$I_MPCS == max(rv$results_df$I_MPCS)
@@ -636,14 +625,12 @@ server <- function(input, output, session) {
         )
       }
       
-      html_lines <- c(html_lines, "</tbody></table>")
-      
-      # --- Interpretación ---
       top_group <- rv$results_df[which.max(rv$results_df$I_MPCS), ]
       bottom_group <- rv$results_df[which.min(rv$results_df$I_MPCS), ]
       
       html_lines <- c(
         html_lines,
+        "</tbody></table>",
         "<h2>💡 3. Interpretación de resultados</h2>",
         "<div class='highlight'>",
         "<p><b>🔴 Grupo con mayor prioridad de intervención:</b></p>",
@@ -671,35 +658,4 @@ server <- function(input, output, session) {
         "<p>MPCS: A Predictive Model of Systemic Behavioral Change... (Autor, año).</p>",
         "<div class='footer'>",
         "<p>Reporte generado automáticamente por <b>MPCS Calculator</b></p>",
-        "<p>Repositorio: <a href='https://github.com/Izela-meth/MPCS_APP' target='_blank'>https://github.com/Izela-meth/MPCS_APP</a></p>",
-        "</div>",
-        "</body>",
-        "</html>"
-      )
-      
-      # --- Guardar el archivo HTML ---
-      writeLines(html_lines, file)
-      
-      showNotification("Reporte HTML generado correctamente.", type = "message")
-    }
-  )
-}
-
-# ============================================================================
-# EJECUTAR LA APLICACIÓN CON FOOTER
-# ============================================================================
-
-app <- shinyApp(ui = ui, server = server)
-
-app <- tagList(
-  app,
-  tags$footer(
-    class = "bg-light p-3 text-center small border-top mt-4",
-    tags$b("Citación:"), 
-    "MPCS: A Predictive Model of Systemic Behavioral Change... (Autor, año). ",
-    tags$a("DOI del artículo", href = "#"), " | ",
-    tags$a("Repositorio GitHub", href = "https://github.com/Izela-meth/MPCS_APP")
-  )
-)
-
-app
+        "<p>Repositorio:
