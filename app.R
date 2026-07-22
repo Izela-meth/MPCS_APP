@@ -277,7 +277,7 @@ server <- function(input, output, session) {
   })
   
   # ========================================================================
-  # CARGA DE DATOS DE DEMOSTRACIÓN (CORREGIDO)
+  # CARGA DE DATOS DE DEMOSTRACIÓN (VERSIÓN DEFINITIVA Y CORREGIDA)
   # ========================================================================
   observeEvent(input$load_demo, {
     showNotification("Cargando datos de demostración...", type = "message")
@@ -286,16 +286,16 @@ server <- function(input, output, session) {
     generar_y_cargar_demo <- function() {
       datos_demo <- generar_demo_data(1000, 123)
       rv$data <- datos_demo
-      showNotification("Datos de demostración generados exitosamente (n=1000).", type = "success")
+      showNotification("Datos de demostración generados exitosamente (n=1000).", type = "message")
     }
     
     # Intentar cargar desde archivo
     if (file.exists("data/demo_data.csv")) {
       tryCatch({
         rv$data <- read.csv("data/demo_data.csv")
-        showNotification("Datos de demostración cargados desde archivo.", type = "success")
+        showNotification("Datos de demostración cargados desde archivo.", type = "message")
       }, error = function(e) {
-        showNotification(paste("Error al leer archivo:", e$message), type = "warning")
+        showNotification(paste("Error al leer archivo:", e$message), type = "error")
         generar_y_cargar_demo()
       })
     } else {
@@ -304,7 +304,7 @@ server <- function(input, output, session) {
       generar_y_cargar_demo()
     }
     
-    # Actualizar selectores
+    # Actualizar selectores con los datos cargados
     vars <- names(rv$data)
     vars_num <- names(rv$data)[sapply(rv$data, is.numeric)]
     updateSelectInput(session, "graph_vars", choices = vars_num, 
