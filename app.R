@@ -28,7 +28,7 @@ if (!file.exists("data/demo_data.csv")) {
 }
 
 # ============================================================================
-# UI — INTERFAZ DE USUARIO
+# UI — INTERFAZ DE USUARIO (CON FOOTER CORREGIDO)
 # ============================================================================
 
 ui <- page_navbar(
@@ -38,14 +38,6 @@ ui <- page_navbar(
     "MPCS Calculator"
   ),
   theme = bs_theme(bootswatch = "flatly", version = 5),
-  
-  footer = div(
-    class = "bg-light p-3 text-center small",
-    tags$b("Citación:"), 
-    "MPCS: A Predictive Model of Systemic Behavioral Change... (Autor, año). ",
-    tags$a("DOI del artículo", href = "#"), " | ",
-    tags$a("Repositorio GitHub", href = "https://github.com/Izela-meth/MPCS_APP")
-  ),
   
   # ========================================================================
   # Pestaña 1: Carga de Datos
@@ -230,7 +222,6 @@ ui <- page_navbar(
     )
   )
 )
-
 # ============================================================================
 # SERVER — LÓGICA DE LA APLICACIÓN
 # ============================================================================
