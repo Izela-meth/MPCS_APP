@@ -220,6 +220,17 @@ ui <- page_navbar(
         )
       )
     )
+  ),
+  
+  # ============================================================================
+  # FOOTER (DENTRO DEL UI)
+  # ============================================================================
+  footer = tags$footer(
+    class = "bg-light p-3 text-center small border-top mt-4",
+    tags$b("Citación:"), 
+    "MPCS: A Predictive Model of Systemic Behavioral Change... (Autor, año). ",
+    tags$a("DOI del artículo", href = "#"), " | ",
+    tags$a("Repositorio GitHub", href = "https://github.com/Izela-meth/MPCS_APP")
   )
 )
 
@@ -348,12 +359,11 @@ server <- function(input, output, session) {
   })
   
   # ==========================================================================
-  # EJECUTAR MPCS — VERSIÓN CORREGIDA
+  # EJECUTAR MPCS
   # ==========================================================================
   observeEvent(input$run_mpcs, {
     req(rv$data)
     
-    # --- Validaciones ---
     if (is.null(input$graph_vars) || length(input$graph_vars) < 5) {
       showNotification("Seleccione al menos 5 variables.", type = "error")
       output$validation_msg <- renderUI({ 
@@ -390,7 +400,6 @@ server <- function(input, output, session) {
     withProgress(message = 'Ejecutando MPCS...', value = 0, {
       data_analysis <- rv$data
       
-      # --- Agrupación ---
       if (input$group_var == "Ninguno (Global)") {
         data_analysis$Group <- "Global"
         grupos <- "Global"
@@ -413,7 +422,6 @@ server <- function(input, output, session) {
           next
         }
         
-        # --- 1. Grafo ---
         graph_data <- sub[, input$graph_vars, drop = FALSE]
         graph_res <- calcular_grafo(graph_data, input$graph_vars, input$threshold)
         
@@ -424,13 +432,8 @@ server <- function(input, output, session) {
           graph_res$graph <- NULL
         }
         
-        # --- 2. Markov ---
         markov_res <- calcular_markov(sub[[input$markov_var]], umbral_objetivo = 0.50)
-        
-        # --- 3. Juegos ---
         games_res <- calcular_juegos(markov_res$mat, input$R_factor)
-        
-        # --- 4. Índice MPCS ---
         index_res <- calcular_indice(
           I_grafo = graph_res$score,
           I_markov = markov_res$score,
@@ -467,7 +470,6 @@ server <- function(input, output, session) {
       
       rv$results <- results_list
       
-      # --- Tabla de resultados ---
       results_df <- do.call(rbind, lapply(results_list, function(r) {
         data.frame(
           Grupo = r$grupo,
@@ -482,7 +484,6 @@ server <- function(input, output, session) {
       
       rv$results_df <- results_df
       
-      # --- Generar gráficos ---
       rv$plots <- generate_plots(
         data = data_analysis,
         graph_vars = input$graph_vars,
@@ -512,7 +513,6 @@ server <- function(input, output, session) {
     first_group <- results$Grupo[1]
     r <- results_list[[as.character(first_group)]]
     
-    # --- Gráfico 1: Grafo ---
     if (!is.null(r$graph) && vcount(r$graph) > 0) {
       V(r$graph)$color <- ifelse(V(r$graph)$name == r$nodo_optimo, "#C0392B", "#F0DFC0")
       V(r$graph)$size <- ifelse(V(r$graph)$name == r$nodo_optimo, 25, 15)
@@ -525,7 +525,6 @@ server <- function(input, output, session) {
       }
     }
     
-    # --- Gráfico 2: Distribución de estados ---
     if (!is.null(markov_var) && markov_var %in% names(data)) {
       p_states <- function() {
         if (!"Group" %in% names(data)) data$Group <- "Global"
@@ -542,7 +541,6 @@ server <- function(input, output, session) {
       }
     }
     
-    # --- Gráfico 3: Ranking ---
     if (!is.null(results) && nrow(results) > 0) {
       p_rank <- function() {
         ggplot(results, aes(x = reorder(Grupo, I_MPCS), y = I_MPCS, fill = Tipo_Nudge)) +
@@ -557,7 +555,6 @@ server <- function(input, output, session) {
       }
     }
     
-    # --- Gráfico 4: Trayectorias de Markov ---
     p_markov <- function() {
       r <- results_list[[as.character(first_group)]]
       
@@ -603,7 +600,6 @@ server <- function(input, output, session) {
         }
       }
       
-      # Fallback: simulación simple
       t <- 1:15
       df <- data.frame(
         Tiempo = t,
@@ -799,20 +795,7 @@ server <- function(input, output, session) {
 }
 
 # ==============================================================================
-# EJECUTAR LA APLICACIÓN CON FOOTER
+# EJECUTAR LA APLICACIÓN
 # ==============================================================================
 
-app <- shinyApp(ui = ui, server = server)
-
-app <- tagList(
-  app,
-  tags$footer(
-    class = "bg-light p-3 text-center small border-top mt-4",
-    tags$b("Citación:"), 
-    "MPCS: A Predictive Model of Systemic Behavioral Change... (Autor, año). ",
-    tags$a("DOI del artículo", href = "#"), " | ",
-    tags$a("Repositorio GitHub", href = "https://github.com/Izela-meth/MPCS_APP")
-  )
-)
-
-app
+shinyApp(ui = ui, server = server)
