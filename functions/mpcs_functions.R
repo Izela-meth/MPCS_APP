@@ -622,3 +622,264 @@ validar_datos <- function(datos, min_filas = 30, min_vars_num = 5) {
 # ============================================================================
 # FIN DEL ARCHIVO
 # ============================================================================
+
+# =============================================================================
+# ANÁLISIS DE SENSIBILIDAD
+# Evalúa la robustez del Índice MPCS ante variaciones en los pesos w1, w2, w3
+# =============================================================================
+#' @param I_Grafo   Índice del módulo de grafos (0-1)
+#' @param I_Markov  Índice del módulo de Markov (0-1)  
+#' @param I_Juegos  Índice del módulo de juegos (0-1)
+#' @param n_sim     Número de simulaciones (por defecto 10,000)
+#' @param R         Factor de recursos (por defecto 0.65)
+#' @param escala    Factor de escala (por defecto 1.5)
+#' @param seed      Semilla para reproducibilidad (por defecto 123)
+#' @return Lista con resultados del análisis de sensibilidad
+#' =============================================================================
+
+analisis_sensibilidad <- function(I_Grafo, I_Markov, I_Juegos,
+                                   n_sim = 10000, 
+                                   R = 0.65, 
+                                   escala = 1.5,
+                                   seed = 123) {
+  
+  # Validar entradas
+  if (is.null(I_Grafo) || is.na(I_Grafo)) I_Grafo <- 0.5
+  if (is.null(I_Markov) || is.na(I_Markov)) I_Markov <- 0.5
+  if (is.null(I_Juegos) || is.na(I_Juegos)) I_Juegos <- 0.5
+  
+  # Generar combinaciones aleatorias de pesos (suman 1)
+  set.seed(seed)
+  pesos_sim <- matrix(NA, n_sim, 3)
+  colnames(pesos_sim) <- c("w1", "w2", "w3")
+  
+  for (i in 1:n_sim) {
+    w <- runif(3)
+    w <- w / sum(w)
+    pesos_sim[i, ] <- w
+  }
+  
+  # Calcular I_MPCS para cada combinación
+  I_MPCS_sim <- apply(pesos_sim, 1, function(w) {
+    w[1] * I_Grafo + w[2] * I_Markov + w[3] * I_Juegos
+  })
+  
+  # Calcular k y tipo de nudge para cada simulación
+  k_sim <- pmin(1, I_MPCS_sim * R * escala)
+  
+  tipo_sim <- case_when(
+    k_sim < 0.25 ~ "Informativo",
+    k_sim < 0.50 ~ "Estructural",
+    k_sim < 0.75 ~ "Normativo",
+    TRUE         ~ "Sistémico multi-nudge"
+  )
+  
+  # Calcular I_MPCS con pesos por defecto
+  w_default <- c(0.35, 0.40, 0.25)
+  I_MPCS_default <- w_default[1] * I_Grafo +
+                    w_default[2] * I_Markov +
+                    w_default[3] * I_Juegos
+  
+  k_default <- min(1, I_MPCS_default * R * escala)
+  
+  tipo_default <- case_when(
+    k_default < 0.25 ~ "Informativo",
+    k_default < 0.50 ~ "Estructural",
+    k_default < 0.75 ~ "Normativo",
+    TRUE            ~ "Sistémico multi-nudge"
+  )
+  
+  # Frecuencia de tipos de nudge
+  freq_tipo <- table(tipo_sim)
+  tipo_mas_frecuente <- names(freq_tipo)[which.max(freq_tipo)]
+  pct_mas_frecuente <- max(freq_tipo) / n_sim * 100
+  
+  # Porcentaje de simulaciones que coinciden con el tipo por defecto
+  pct_coincidencia <- sum(tipo_sim == tipo_default) / n_sim * 100
+  
+  # Estadísticas de I_MPCS
+  stats <- list(
+    media = mean(I_MPCS_sim, na.rm = TRUE),
+    mediana = median(I_MPCS_sim, na.rm = TRUE),
+    sd = sd(I_MPCS_sim, na.rm = TRUE),
+    cv = sd(I_MPCS_sim, na.rm = TRUE) / mean(I_MPCS_sim, na.rm = TRUE) * 100,
+    min = min(I_MPCS_sim, na.rm = TRUE),
+    max = max(I_MPCS_sim, na.rm = TRUE),
+    q25 = quantile(I_MPCS_sim, 0.25, na.rm = TRUE),
+    q75 = quantile(I_MPCS_sim, 0.75, na.rm = TRUE)
+  )
+  
+  # Intervalo de confianza 95%
+  ic_inf <- quantile(I_MPCS_sim, 0.025, na.rm = TRUE)
+  ic_sup <- quantile(I_MPCS_sim, 0.975, na.rm = TRUE)
+  
+  # Resultado
+  list(
+    # Datos para gráficos
+    I_MPCS_sim = I_MPCS_sim,
+    tipo_sim = tipo_sim,
+    pesos_sim = pesos_sim,
+    
+    # Valores por defecto
+    I_MPCS_default = I_MPCS_default,
+    k_default = k_default,
+    tipo_default = tipo_default,
+    
+    # Frecuencia de tipos
+    freq_tipo = freq_tipo,
+    tipo_mas_frecuente = tipo_mas_frecuente,
+    pct_mas_frecuente = pct_mas_frecuente,
+    pct_coincidencia = pct_coincidencia,
+    
+    # Estadísticas
+    stats = stats,
+    ic_inf = ic_inf,
+    ic_sup = ic_sup,
+    
+    # Parámetros usados
+    n_sim = n_sim,
+    R = R,
+    escala = escala
+  )
+}
+
+# =============================================================================
+# GRÁFICO DE SENSIBILIDAD
+# =============================================================================
+#' @param resultado_sens Resultado de analisis_sensibilidad()
+#' @param idioma "es" o "en"
+#' @return Objeto ggplot
+
+grafico_sensibilidad <- function(resultado_sens, idioma = "es") {
+  
+  df <- data.frame(
+    I_MPCS = resultado_sens$I_MPCS_sim,
+    Tipo = resultado_sens$tipo_sim
+  )
+  
+  # Etiquetas según idioma
+  if (idioma == "es") {
+    titulo <- "Análisis de Sensibilidad del Índice MPCS"
+    subtitulo <- paste("10,000 combinaciones aleatorias de pesos w1, w2, w3")
+    eje_x <- "Índice MPCS"
+    eje_y <- "Frecuencia"
+    leyenda <- "Tipo de nudge"
+    default_label <- "Pesos por defecto"
+  } else {
+    titulo <- "Sensitivity Analysis of MPCS Index"
+    subtitulo <- paste("10,000 random combinations of weights w1, w2, w3")
+    eje_x <- "MPCS Index"
+    eje_y <- "Frequency"
+    leyenda <- "Nudge type"
+    default_label <- "Default weights"
+  }
+  
+  # Colores según tipo
+  colores <- c(
+    "Informativo" = "#74B3CE",
+    "Estructural" = "#2E86AB",
+    "Normativo" = "#E84855",
+    "Sistémico multi-nudge" = "#1A3A5C"
+  )
+  
+  # Filtrar solo colores que aparecen
+  tipos_presentes <- unique(df$Tipo)
+  colores_filtrados <- colores[names(colores) %in% tipos_presentes]
+  
+  ggplot(df, aes(x = I_MPCS, fill = Tipo)) +
+    geom_histogram(bins = 50, color = "white", alpha = 0.85) +
+    geom_vline(xintercept = resultado_sens$I_MPCS_default,
+               color = "#C0392B", linetype = "dashed", linewidth = 1.2) +
+    geom_vline(xintercept = resultado_sens$ic_inf,
+               color = "#2C3E50", linetype = "dotted", linewidth = 0.8, alpha = 0.5) +
+    geom_vline(xintercept = resultado_sens$ic_sup,
+               color = "#2C3E50", linetype = "dotted", linewidth = 0.8, alpha = 0.5) +
+    annotate("text", 
+             x = resultado_sens$I_MPCS_default + 0.008, 
+             y = max(table(cut(df$I_MPCS, breaks = 50))) * 0.9,
+             label = paste0(default_label, "\nI_MPCS = ", 
+                           round(resultado_sens$I_MPCS_default, 4)),
+             hjust = 0, size = 3.5, color = "#C0392B") +
+    scale_fill_manual(values = colores_filtrados) +
+    labs(
+      title = titulo,
+      subtitle = subtitulo,
+      x = eje_x,
+      y = eje_y,
+      fill = leyenda
+    ) +
+    theme_minimal(base_size = 13) +
+    theme(
+      legend.position = "bottom",
+      plot.title = element_text(face = "bold"),
+      panel.grid.minor = element_blank()
+    )
+}
+
+# =============================================================================
+# RESUMEN TEXTUAL DE SENSIBILIDAD
+# =============================================================================
+#' @param resultado_sens Resultado de analisis_sensibilidad()
+#' @param idioma "es" o "en"
+#' @return Texto formateado
+
+resumen_sensibilidad <- function(resultado_sens, idioma = "es") {
+  
+  if (idioma == "es") {
+    cat("=== RESULTADOS DEL ANÁLISIS DE SENSIBILIDAD ===\n\n")
+    cat(sprintf("Número de simulaciones: %d\n", resultado_sens$n_sim))
+    cat(sprintf("Media de I_MPCS: %.4f\n", resultado_sens$stats$media))
+    cat(sprintf("Desviación estándar: %.4f\n", resultado_sens$stats$sd))
+    cat(sprintf("Coeficiente de variación: %.1f%%\n", resultado_sens$stats$cv))
+    cat(sprintf("Intervalo de confianza 95%%: [%.4f, %.4f]\n", 
+                resultado_sens$ic_inf, resultado_sens$ic_sup))
+    cat(sprintf("\nI_MPCS con pesos por defecto (w1=0.35, w2=0.40, w3=0.25): %.4f\n", 
+                resultado_sens$I_MPCS_default))
+    cat(sprintf("Tipo de nudge por defecto: %s\n", resultado_sens$tipo_default))
+    cat(sprintf("\nTipo de nudge más frecuente en simulaciones: %s (%.1f%%)\n",
+                resultado_sens$tipo_mas_frecuente, resultado_sens$pct_mas_frecuente))
+    cat(sprintf("Coincidencia con tipo por defecto: %.1f%%\n", 
+                resultado_sens$pct_coincidencia))
+    
+    # Interpretación
+    cat("\n=== INTERPRETACIÓN ===\n")
+    if (resultado_sens$pct_coincidencia >= 70) {
+      cat("✅ La recomendación de nudge es ALTAMENTE ROBUSTA.\n")
+      cat("   El tipo de nudge se mantiene en más del 70% de las simulaciones.\n")
+    } else if (resultado_sens$pct_coincidencia >= 50) {
+      cat("✅ La recomendación de nudge es ROBUSTA.\n")
+      cat("   El tipo de nudge se mantiene en más del 50% de las simulaciones.\n")
+    } else {
+      cat("⚠️ La recomendación de nudge es SENSIBLE a los pesos.\n")
+      cat("   Se recomienda revisar la ponderación o realizar un análisis adicional.\n")
+    }
+    
+  } else {
+    cat("=== SENSITIVITY ANALYSIS RESULTS ===\n\n")
+    cat(sprintf("Number of simulations: %d\n", resultado_sens$n_sim))
+    cat(sprintf("Mean I_MPCS: %.4f\n", resultado_sens$stats$media))
+    cat(sprintf("Standard deviation: %.4f\n", resultado_sens$stats$sd))
+    cat(sprintf("Coefficient of variation: %.1f%%\n", resultado_sens$stats$cv))
+    cat(sprintf("95%% Confidence interval: [%.4f, %.4f]\n", 
+                resultado_sens$ic_inf, resultado_sens$ic_sup))
+    cat(sprintf("\nI_MPCS with default weights (w1=0.35, w2=0.40, w3=0.25): %.4f\n", 
+                resultado_sens$I_MPCS_default))
+    cat(sprintf("Default nudge type: %s\n", resultado_sens$tipo_default))
+    cat(sprintf("\nMost frequent nudge type in simulations: %s (%.1f%%)\n",
+                resultado_sens$tipo_mas_frecuente, resultado_sens$pct_mas_frecuente))
+    cat(sprintf("Agreement with default type: %.1f%%\n", 
+                resultado_sens$pct_coincidencia))
+    
+    cat("\n=== INTERPRETATION ===\n")
+    if (resultado_sens$pct_coincidencia >= 70) {
+      cat("✅ The nudge recommendation is HIGHLY ROBUST.\n")
+      cat("   The nudge type remains in more than 70% of simulations.\n")
+    } else if (resultado_sens$pct_coincidencia >= 50) {
+      cat("✅ The nudge recommendation is ROBUST.\n")
+      cat("   The nudge type remains in more than 50% of simulations.\n")
+    } else {
+      cat("⚠️ The nudge recommendation is SENSITIVE to weights.\n")
+      cat("   Consider reviewing the weighting or conducting additional analysis.\n")
+    }
+  }
+}    
