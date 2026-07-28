@@ -199,6 +199,50 @@ ui <- page_navbar(
         )
       )
     ),
+    # ==========================================================================
+    # NUEVO: Análisis de Sensibilidad
+    # ==========================================================================
+    fluidRow(
+      column(
+        width = 12,
+        wellPanel(
+          h4("🔬 Análisis de Sensibilidad"),
+          p("Evalúa la robustez de la recomendación ante cambios en los pesos w1, w2, w3."),
+          hr(),
+          fluidRow(
+            column(
+              width = 3,
+              numericInput("sens_n_sim", 
+                           "Número de simulaciones:", 
+                           value = 10000, 
+                           min = 100, 
+                           max = 50000,
+                           step = 100),
+              br(),
+              actionButton("run_sensitivity", 
+                           "▶ Ejecutar análisis",
+                           icon = icon("chart-line"),
+                           class = "btn-primary",
+                           style = "width: 100%;")
+            ),
+            column(
+              width = 9,
+              conditionalPanel(
+                condition = "input.run_sensitivity > 0",
+                div(style = "padding: 10px; background-color: #f8f9fa; border-radius: 5px;",
+                    h5("📈 Distribución del Índice MPCS"),
+                    plotOutput("sens_plot", height = "300px"),
+                    verbatimTextOutput("sens_summary")
+                )
+              )
+            )
+          )
+        )
+      )
+    ),
+    # ==========================================================================
+    # Interpretación
+    # ==========================================================================
     fluidRow(
       column(
         width = 12,
@@ -250,7 +294,9 @@ server <- function(input, output, session) {
     data = NULL,
     results = NULL,
     results_df = NULL,
-    plots = NULL
+    plots = NULL,
+    # Para sensibilidad
+    sens_resultado = NULL
   )
   
   # ==========================================================================
@@ -573,7 +619,7 @@ server <- function(input, output, session) {
           P_n <- r$markov_mat
           if (!is.null(P_n)) {
             for (i in 1:(nrow(P_n)-1)) {
-              av <- P_n[i, i] * r$k
+              av <- P_n[i, i] * 0.4
               P_n[i, i] <- P_n[i, i] - av
               P_n[i, i+1] <- P_n[i, i+1] + av
               P_n[i, ] <- P_n[i, ] / sum(P_n[i, ])
@@ -668,6 +714,152 @@ server <- function(input, output, session) {
     }
   })
   
+  # ==========================================================================
+  # NUEVO: ANÁLISIS DE SENSIBILIDAD
+  # ==========================================================================
+  observeEvent(input$run_sensitivity, {
+    
+    # Verificar que hay resultados
+    if (is.null(rv$results_df) || nrow(rv$results_df) == 0) {
+      showNotification("Primero ejecuta el MPCS para obtener resultados.", type = "error")
+      return()
+    }
+    
+    # Obtener el primer grupo (o el de mayor prioridad)
+    top_group_idx <- which.max(rv$results_df$I_MPCS)
+    top_group <- rv$results_df$Grupo[top_group_idx]
+    
+    # Obtener los valores del modelo para ese grupo
+    r <- rv$results[[as.character(top_group)]]
+    
+    if (is.null(r)) {
+      showNotification("No se encontraron resultados para el grupo seleccionado.", type = "error")
+      return()
+    }
+    
+    I_Grafo <- r$I_grafo
+    I_Markov <- r$I_markov
+    I_Juegos <- r$I_juegos
+    
+    # Si algún valor es NA, usar valores por defecto
+    if (is.na(I_Grafo)) I_Grafo <- 0.5
+    if (is.na(I_Markov)) I_Markov <- 0.5
+    if (is.na(I_Juegos)) I_Juegos <- 0.5
+    
+    showNotification(
+      paste("Ejecutando análisis de sensibilidad para el grupo:", top_group),
+      type = "message",
+      duration = 2
+    )
+    
+    withProgress(message = 'Analizando sensibilidad...', value = 0, {
+      
+      # Llamar a la función de sensibilidad
+      resultado_sens <- analisis_sensibilidad(
+        I_Grafo = I_Grafo,
+        I_Markov = I_Markov,
+        I_Juegos = I_Juegos,
+        n_sim = input$sens_n_sim,
+        R = input$R_factor,
+        escala = 1.5,
+        seed = 123
+      )
+      
+      incProgress(0.8, detail = "Generando gráficos...")
+      
+      rv$sens_resultado <- resultado_sens
+      
+      incProgress(1, detail = "Completado")
+    })
+    
+    showNotification("✅ Análisis de sensibilidad completado.", type = "success")
+  })
+  
+  # Gráfico de sensibilidad
+  output$sens_plot <- renderPlot({
+    req(rv$sens_resultado)
+    
+    df <- data.frame(
+      I_MPCS = rv$sens_resultado$I_MPCS_sim,
+      Tipo = rv$sens_resultado$tipo_sim
+    )
+    
+    colores <- c(
+      "Informativo" = "#74B3CE",
+      "Estructural" = "#2E86AB",
+      "Normativo" = "#E84855",
+      "Sistémico multi-nudge" = "#1A3A5C"
+    )
+    
+    tipos_presentes <- unique(df$Tipo)
+    colores_filtrados <- colores[names(colores) %in% tipos_presentes]
+    
+    ggplot(df, aes(x = I_MPCS, fill = Tipo)) +
+      geom_histogram(bins = 50, color = "white", alpha = 0.85) +
+      geom_vline(xintercept = rv$sens_resultado$I_MPCS_default,
+                 color = "#C0392B", linetype = "dashed", linewidth = 1.2) +
+      geom_vline(xintercept = rv$sens_resultado$ic_inf,
+                 color = "#2C3E50", linetype = "dotted", linewidth = 0.8, alpha = 0.5) +
+      geom_vline(xintercept = rv$sens_resultado$ic_sup,
+                 color = "#2C3E50", linetype = "dotted", linewidth = 0.8, alpha = 0.5) +
+      annotate("text", 
+               x = rv$sens_resultado$I_MPCS_default + 0.008, 
+               y = max(table(cut(df$I_MPCS, breaks = 50))) * 0.9,
+               label = paste0("Pesos por defecto\nI_MPCS = ", 
+                             round(rv$sens_resultado$I_MPCS_default, 4)),
+               hjust = 0, size = 3.5, color = "#C0392B") +
+      scale_fill_manual(values = colores_filtrados) +
+      labs(
+        title = "Análisis de Sensibilidad del Índice MPCS",
+        subtitle = paste0(rv$sens_resultado$n_sim, " combinaciones aleatorias de pesos w1, w2, w3"),
+        x = "Índice MPCS",
+        y = "Frecuencia",
+        fill = "Tipo de nudge"
+      ) +
+      theme_minimal(base_size = 13) +
+      theme(
+        legend.position = "bottom",
+        plot.title = element_text(face = "bold"),
+        panel.grid.minor = element_blank()
+      )
+  })
+  
+  # Resumen textual de sensibilidad
+  output$sens_summary <- renderPrint({
+    req(rv$sens_resultado)
+    
+    s <- rv$sens_resultado
+    
+    cat("=== RESULTADOS DEL ANÁLISIS DE SENSIBILIDAD ===\n\n")
+    cat(sprintf("Número de simulaciones: %d\n", s$n_sim))
+    cat(sprintf("Media de I_MPCS: %.4f\n", s$stats$media))
+    cat(sprintf("Desviación estándar: %.4f\n", s$stats$sd))
+    cat(sprintf("Coeficiente de variación: %.1f%%\n", s$stats$cv))
+    cat(sprintf("Intervalo de confianza 95%%: [%.4f, %.4f]\n", 
+                s$ic_inf, s$ic_sup))
+    cat(sprintf("I_MPCS con pesos por defecto: %.4f\n", s$I_MPCS_default))
+    cat(sprintf("Tipo de nudge por defecto: %s\n", s$tipo_default))
+    cat(sprintf("\nTipo de nudge más frecuente en simulaciones: %s (%.1f%%)\n",
+                s$tipo_mas_frecuente, s$pct_mas_frecuente))
+    cat(sprintf("Coincidencia con tipo por defecto: %.1f%%\n", 
+                s$pct_coincidencia))
+    
+    cat("\n=== INTERPRETACIÓN ===\n")
+    if (s$pct_coincidencia >= 70) {
+      cat("✅ La recomendación de nudge es ALTAMENTE ROBUSTA.\n")
+      cat("   El tipo de nudge se mantiene en más del 70% de las simulaciones.\n")
+    } else if (s$pct_coincidencia >= 50) {
+      cat("✅ La recomendación de nudge es ROBUSTA.\n")
+      cat("   El tipo de nudge se mantiene en más del 50% de las simulaciones.\n")
+    } else {
+      cat("⚠️ La recomendación de nudge es SENSIBLE a los pesos.\n")
+      cat("   Se recomienda revisar la ponderación o realizar un análisis adicional.\n")
+    }
+  })
+  
+  # ==========================================================================
+  # INTERPRETACIÓN
+  # ==========================================================================
   output$interpretation_text <- renderUI({
     req(rv$results_df)
     
@@ -801,7 +993,7 @@ server <- function(input, output, session) {
 }
 
 # ==============================================================================
-# EJECUTAR LA APLICACIÓN CON FOOTER EN EL UI
+# EJECUTAR LA APLICACIÓN CON FOOTER
 # ==============================================================================
 
 # Modificar el UI para añadir el footer usando CSS
@@ -829,10 +1021,25 @@ ui <- tagList(
     .mpcs-footer a:hover {
       text-decoration: underline;
     }
-  "))
+    /* Estilo para el panel de sensibilidad */
+    .well-sens {
+      background-color: #f8f9fa;
+      border-radius: 5px;
+      padding: 15px;
+    }
+  ")),
+  tags$footer(
+    class = "mpcs-footer",
+    "MPCS Calculator v1.0 — Desarrollado con ❤️ por el equipo MPCS | ",
+    tags$a(href = "https://github.com/Izela-meth/MPCS_APP", target = "_blank", "GitHub"),
+    " | ",
+    tags$a(href = "mailto:contacto@mpcs.com", "Contacto")
+  )
 )
 
-# Ahora creamos la aplicación con el footer en la UI
+# ==============================================================================
+# EJECUTAR LA APLICACIÓN
+# ==============================================================================
 shinyApp(
   ui = ui,
   server = server
