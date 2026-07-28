@@ -772,7 +772,7 @@ server <- function(input, output, session) {
       incProgress(1, detail = "Completado")
     })
     
-    showNotification("✅ Análisis de sensibilidad completado.", type = "success")
+    showNotification("✅ Análisis de sensibilidad completado.", type = "message")
   })
   
   # Gráfico de sensibilidad
