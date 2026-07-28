@@ -12,6 +12,10 @@
 #   5. aplicar_nudge()      - Aplica nudge a matriz de transición
 #   6. generar_demo_data()  - Genera datos de demostración
 #   7. format_report()      - Formatea resultados para reporte
+#   8. validar_datos()      - Valida la estructura de los datos
+#   9. analisis_sensibilidad() - Análisis de sensibilidad
+#  10. grafico_sensibilidad()  - Gráfico de sensibilidad
+#  11. resumen_sensibilidad()  - Resumen textual de sensibilidad
 # ============================================================================
 
 # ============================================================================
@@ -620,23 +624,20 @@ validar_datos <- function(datos, min_filas = 30, min_vars_num = 5) {
 }
 
 # ============================================================================
-# FIN DEL ARCHIVO
+# 9. analisis_sensibilidad — Análisis de sensibilidad de pesos
 # ============================================================================
 
-# =============================================================================
-# ANÁLISIS DE SENSIBILIDAD
-# Evalúa la robustez del Índice MPCS ante variaciones en los pesos w1, w2, w3
-# =============================================================================
-#' @param I_Grafo   Índice del módulo de grafos (0-1)
-#' @param I_Markov  Índice del módulo de Markov (0-1)  
-#' @param I_Juegos  Índice del módulo de juegos (0-1)
-#' @param n_sim     Número de simulaciones (por defecto 10,000)
-#' @param R         Factor de recursos (por defecto 0.65)
-#' @param escala    Factor de escala (por defecto 1.5)
-#' @param seed      Semilla para reproducibilidad (por defecto 123)
+#' Análisis de sensibilidad del Índice MPCS
+#'
+#' @param I_Grafo Índice del módulo de grafos (0-1)
+#' @param I_Markov Índice del módulo de Markov (0-1)
+#' @param I_Juegos Índice del módulo de juegos (0-1)
+#' @param n_sim Número de simulaciones (defecto: 10000)
+#' @param R Factor de recursos (defecto: 0.65)
+#' @param escala Factor de escala (defecto: 1.5)
+#' @param seed Semilla para reproducibilidad (defecto: 123)
 #' @return Lista con resultados del análisis de sensibilidad
-#' =============================================================================
-
+#' @export
 analisis_sensibilidad <- function(I_Grafo, I_Markov, I_Juegos,
                                    n_sim = 10000, 
                                    R = 0.65, 
@@ -667,7 +668,7 @@ analisis_sensibilidad <- function(I_Grafo, I_Markov, I_Juegos,
   # Calcular k y tipo de nudge para cada simulación
   k_sim <- pmin(1, I_MPCS_sim * R * escala)
   
-  tipo_sim <- case_when(
+  tipo_sim <- dplyr::case_when(
     k_sim < 0.25 ~ "Informativo",
     k_sim < 0.50 ~ "Estructural",
     k_sim < 0.75 ~ "Normativo",
@@ -682,7 +683,7 @@ analisis_sensibilidad <- function(I_Grafo, I_Markov, I_Juegos,
   
   k_default <- min(1, I_MPCS_default * R * escala)
   
-  tipo_default <- case_when(
+  tipo_default <- dplyr::case_when(
     k_default < 0.25 ~ "Informativo",
     k_default < 0.50 ~ "Estructural",
     k_default < 0.75 ~ "Normativo",
@@ -743,14 +744,22 @@ analisis_sensibilidad <- function(I_Grafo, I_Markov, I_Juegos,
   )
 }
 
-# =============================================================================
-# GRÁFICO DE SENSIBILIDAD
-# =============================================================================
+# ============================================================================
+# 10. grafico_sensibilidad — Gráfico de sensibilidad
+# ============================================================================
+
+#' Gráfico de sensibilidad
+#'
 #' @param resultado_sens Resultado de analisis_sensibilidad()
 #' @param idioma "es" o "en"
 #' @return Objeto ggplot
-
+#' @export
 grafico_sensibilidad <- function(resultado_sens, idioma = "es") {
+  
+  # Cargar ggplot2 si no está cargado
+  if (!requireNamespace("ggplot2", quietly = TRUE)) {
+    stop("Se requiere el paquete ggplot2")
+  }
   
   df <- data.frame(
     I_MPCS = resultado_sens$I_MPCS_sim,
@@ -786,43 +795,51 @@ grafico_sensibilidad <- function(resultado_sens, idioma = "es") {
   tipos_presentes <- unique(df$Tipo)
   colores_filtrados <- colores[names(colores) %in% tipos_presentes]
   
-  ggplot(df, aes(x = I_MPCS, fill = Tipo)) +
-    geom_histogram(bins = 50, color = "white", alpha = 0.85) +
-    geom_vline(xintercept = resultado_sens$I_MPCS_default,
+  # Calcular altura máxima para el texto
+  bins <- 50
+  hist_data <- hist(df$I_MPCS, breaks = bins, plot = FALSE)
+  max_y <- max(hist_data$counts)
+  
+  ggplot2::ggplot(df, ggplot2::aes(x = I_MPCS, fill = Tipo)) +
+    ggplot2::geom_histogram(bins = bins, color = "white", alpha = 0.85) +
+    ggplot2::geom_vline(xintercept = resultado_sens$I_MPCS_default,
                color = "#C0392B", linetype = "dashed", linewidth = 1.2) +
-    geom_vline(xintercept = resultado_sens$ic_inf,
+    ggplot2::geom_vline(xintercept = resultado_sens$ic_inf,
                color = "#2C3E50", linetype = "dotted", linewidth = 0.8, alpha = 0.5) +
-    geom_vline(xintercept = resultado_sens$ic_sup,
+    ggplot2::geom_vline(xintercept = resultado_sens$ic_sup,
                color = "#2C3E50", linetype = "dotted", linewidth = 0.8, alpha = 0.5) +
-    annotate("text", 
+    ggplot2::annotate("text", 
              x = resultado_sens$I_MPCS_default + 0.008, 
-             y = max(table(cut(df$I_MPCS, breaks = 50))) * 0.9,
+             y = max_y * 0.9,
              label = paste0(default_label, "\nI_MPCS = ", 
                            round(resultado_sens$I_MPCS_default, 4)),
              hjust = 0, size = 3.5, color = "#C0392B") +
-    scale_fill_manual(values = colores_filtrados) +
-    labs(
+    ggplot2::scale_fill_manual(values = colores_filtrados) +
+    ggplot2::labs(
       title = titulo,
       subtitle = subtitulo,
       x = eje_x,
       y = eje_y,
       fill = leyenda
     ) +
-    theme_minimal(base_size = 13) +
-    theme(
+    ggplot2::theme_minimal(base_size = 13) +
+    ggplot2::theme(
       legend.position = "bottom",
-      plot.title = element_text(face = "bold"),
-      panel.grid.minor = element_blank()
+      plot.title = ggplot2::element_text(face = "bold"),
+      panel.grid.minor = ggplot2::element_blank()
     )
 }
 
-# =============================================================================
-# RESUMEN TEXTUAL DE SENSIBILIDAD
-# =============================================================================
+# ============================================================================
+# 11. resumen_sensibilidad — Resumen textual de sensibilidad
+# ============================================================================
+
+#' Resumen textual de sensibilidad
+#'
 #' @param resultado_sens Resultado de analisis_sensibilidad()
 #' @param idioma "es" o "en"
-#' @return Texto formateado
-
+#' @return Texto formateado (impreso en consola)
+#' @export
 resumen_sensibilidad <- function(resultado_sens, idioma = "es") {
   
   if (idioma == "es") {
@@ -882,4 +899,8 @@ resumen_sensibilidad <- function(resultado_sens, idioma = "es") {
       cat("   Consider reviewing the weighting or conducting additional analysis.\n")
     }
   }
-}    
+}
+
+# ============================================================================
+# FIN DEL ARCHIVO
+# ============================================================================
