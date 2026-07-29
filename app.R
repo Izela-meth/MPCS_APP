@@ -132,8 +132,12 @@ ui <- page_navbar(
               fijo de 10 períodos</b>, en lugar del tiempo de convergencia discreto. 
               Esto permite capturar mejor las diferencias en las condiciones iniciales 
               entre grupos.<br><br>
-              <b>Teoría de Juegos:</b> La matriz de pagos es fija (<i>I_Juegos = 0.50</i>), 
-              consistente con el artículo de MethodsX (Sección 2.4).<br><br>
+              <b>I_Juegos (Teoría de Juegos):</b> La matriz de pagos es <b>dinámica</b> 
+              y depende del indicador de acceso a salud (<i>α</i>) calculado a partir 
+              de los datos del grupo. Esto permite que la masa crítica <i>p*</i> varíe 
+              según el contexto (entre 0.53 y 0.55 en el caso de estudio), reflejando 
+              que en entornos con menor acceso se requiere una mayor proporción de 
+              adoptantes para que la conducta sea autosostenible.<br><br>
               <b>Referencia:</b> Los resultados del caso de estudio (ENDES 2024, seis regiones) 
               fueron producidos con el script de aplicación específica (Material Suplementario), 
               que calibra la matriz con tasas de transición de la literatura longitudinal 
@@ -486,11 +490,23 @@ server <- function(input, output, session) {
           graph_res$graph <- NULL
         }
         
+        # ============================================================
+        # [CORREGIDO] Calcular alpha para el grupo
+        # ============================================================
+        alpha_grupo <- 0.60  # valor por defecto
+        if ("Acceso_salud" %in% names(sub)) {
+          alpha_grupo <- mean(sub$Acceso_salud, na.rm = TRUE)
+          if (is.na(alpha_grupo) || is.nan(alpha_grupo)) alpha_grupo <- 0.60
+        }
+        
         # [CORREGIDO] Pasar horizonte = 10 a calcular_markov (Opción B)
         markov_res <- calcular_markov(sub[[input$markov_var]], 
                                       umbral_objetivo = 0.50, 
                                       horizonte = 10)
-        games_res <- calcular_juegos(markov_res$mat, input$R_factor)
+        
+        # [CORREGIDO] Pasar alpha a calcular_juegos (dinámico)
+        games_res <- calcular_juegos(markov_res$mat, input$R_factor, alpha = alpha_grupo)
+        
         index_res <- calcular_indice(
           I_grafo = graph_res$score,
           I_markov = markov_res$score,
@@ -508,6 +524,7 @@ server <- function(input, output, session) {
           I_grafo = graph_res$score,
           I_markov = markov_res$score,
           I_juegos = games_res$score,
+          alpha = alpha_grupo,
           I_MPCS = index_res$I_MPCS,
           k = index_res$k,
           tipo = index_res$nudge_type,
@@ -527,12 +544,14 @@ server <- function(input, output, session) {
       
       rv$results <- results_list
       
-      # [CORREGIDO] Añadir columna I_Markov_H10
+      # [CORREGIDO] Añadir columna I_Markov_H10 y Alpha
       results_df <- do.call(rbind, lapply(results_list, function(r) {
         data.frame(
           Grupo = r$grupo,
           n = r$n,
+          Alpha = round(r$alpha, 3),
           I_Markov_H10 = round(r$I_markov, 4),
+          I_Juegos = round(r$I_juegos, 4),
           I_MPCS = round(r$I_MPCS, 4),
           Nodo_Optimo = r$nodo_optimo,
           k = round(r$k, 4),
@@ -686,7 +705,7 @@ server <- function(input, output, session) {
   output$results_table <- renderDT({
     req(rv$results_df)
     datatable(rv$results_df, options = list(scrollX = TRUE, pageLength = 10), rownames = FALSE) %>%
-      formatRound(columns = c("I_Markov_H10", "I_MPCS", "k"), digits = 4)
+      formatRound(columns = c("I_Markov_H10", "I_Juegos", "I_MPCS", "k"), digits = 4)
   })
   
   output$plot_graph <- renderPlot({
@@ -941,7 +960,7 @@ server <- function(input, output, session) {
         "<br>",
         "<h2>📊 2. Tabla de resultados</h2>",
         "<table>",
-        "<thead><tr><th>Grupo</th><th>n</th><th>I_Markov_H10</th><th>I_MPCS</th><th>Nodo óptimo</th><th>k</th><th>Tipo Nudge</th></tr></thead>",
+        "<thead><tr><th>Grupo</th><th>n</th><th>Alpha</th><th>I_Markov_H10</th><th>I_Juegos</th><th>I_MPCS</th><th>Nodo óptimo</th><th>k</th><th>Tipo Nudge</th></tr></thead>",
         "<tbody>"
       )
       
@@ -955,7 +974,9 @@ server <- function(input, output, session) {
           paste0("<tr", bg_color, ">"),
           paste0("<td><b>", row$Grupo, icono, "</b></td>"),
           paste0("<td>", row$n, "</td>"),
+          paste0("<td>", round(row$Alpha, 3), "</td>"),
           paste0("<td>", round(row$I_Markov_H10, 4), "</td>"),
+          paste0("<td>", round(row$I_Juegos, 4), "</td>"),
           paste0("<td><b>", round(row$I_MPCS, 4), "</b></td>"),
           paste0("<td>", row$Nodo_Optimo, "</td>"),
           paste0("<td>", round(row$k, 4), "</td>"),
