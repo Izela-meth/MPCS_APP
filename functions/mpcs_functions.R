@@ -6,8 +6,8 @@
 # ============================================================================
 # Funciones incluidas:
 #   1. calcular_grafo()     - Construye el grafo y calcula centralidades
-#   2. calcular_markov()    - Estima cadena de Markov y convergencia
-#   3. calcular_juegos()    - Calcula masa crítica (teoría de juegos)
+#   2. calcular_markov()    - Estima cadena de Markov (Opción B: H=10)
+#   3. calcular_juegos()    - Calcula masa crítica (dinámica con α)
 #   4. calcular_indice()    - Calcula Índice MPCS y tipo de nudge
 #   5. aplicar_nudge()      - Aplica nudge a matriz de transición
 #   6. generar_demo_data()  - Genera datos de demostración
@@ -151,7 +151,7 @@ calcular_grafo <- function(datos, variables, umbral = 0.10) {
 }
 
 # ============================================================================
-# 2. calcular_markov — Estima cadena de Markov (OPCIÓN B: horizonte fijo H=10)
+# 2. calcular_markov — Estima cadena de Markov (OPCIÓN B: HORIZONTE FIJO H=10)
 # ============================================================================
 
 #' Calcular cadena de Markov y convergencia (Opción B)
@@ -196,13 +196,16 @@ calcular_markov <- function(estados, orden_estados = NULL,
   
   # Si no se especifica orden, intentar ordenar automáticamente
   if (is.null(orden_estados)) {
+    # Intentar ordenar como E1, E2, E3, ...
     if (all(grepl("^E[0-9]+$", estados_unicos))) {
       orden_estados <- estados_unicos[order(as.numeric(gsub("E", "", estados_unicos)))]
     } else {
+      # Ordenar por frecuencia (de más a menos común)
       freq <- table(estados_clean)
       orden_estados <- names(sort(freq, decreasing = TRUE))
     }
   } else {
+    # Verificar que todos los estados estén en el orden
     faltantes <- setdiff(estados_unicos, orden_estados)
     if (length(faltantes) > 0) {
       orden_estados <- c(orden_estados, faltantes)
@@ -234,13 +237,20 @@ calcular_markov <- function(estados, orden_estados = NULL,
   }
   
   # --- Construir matriz de transición genérica ---
+  # En ausencia de datos longitudinales, se usan supuestos de progresión conservadores
   P <- matrix(0, nrow = m, ncol = m)
   colnames(P) <- orden_estados
   rownames(P) <- orden_estados
   
   for (i in 1:(m-1)) {
+    # Probabilidad de avanzar al siguiente estado
+    # Mayor probabilidad de avance desde estados tempranos
     prob_avance <- 0.30 + 0.20 * (1 - i/m)
+    
+    # Probabilidad de permanecer
     prob_quedarse <- 0.50 - 0.15 * (i/m)
+    
+    # Probabilidad de retroceder (pequeña)
     prob_retroceso <- 0.10 * (1 - i/m)
     
     P[i, i] <- prob_quedarse
@@ -250,6 +260,7 @@ calcular_markov <- function(estados, orden_estados = NULL,
       P[i, i-1] <- prob_retroceso
     }
     
+    # Distribuir el resto entre otros estados
     resto <- 1 - sum(P[i, ])
     if (resto > 0) {
       otros <- setdiff(1:m, c(i, i+1, if (i > 1) i-1 else NULL))
@@ -259,8 +270,11 @@ calcular_markov <- function(estados, orden_estados = NULL,
     }
   }
   
+  # Último estado: alta permanencia (la conducta está consolidada)
   P[m, m] <- 0.85
   P[m, 1:(m-1)] <- (1 - 0.85) / (m - 1)
+  
+  # Normalizar filas para asegurar que suman 1
   P <- P / rowSums(P)
   
   # --- Simular cadena de Markov ---
@@ -280,17 +294,24 @@ calcular_markov <- function(estados, orden_estados = NULL,
   # ============================================================
   # [OPCIÓN B] I_Markov = adherencia en horizonte fijo H
   # ============================================================
+  # En lugar de medir el tiempo en llegar al umbral, medimos el
+  # progreso alcanzado en el período H (por defecto H=10)
+  # ============================================================
   
   idx_h <- min(horizonte + 1, nrow(sim_base))
   
   if (m >= 2) {
+    # La adherencia es la suma de los dos últimos estados (control + adherencia plena)
     score <- sim_base[idx_h, m] + sim_base[idx_h, max(1, m-1)]
   } else {
     score <- sim_base[idx_h, m]
   }
+  
+  # Asegurar que score esté en [0,1]
   score <- max(0, min(1, score))
   
-  # T_base se mantiene para referencia
+  # --- T_base se mantiene para referencia (pero ya no se usa para I_Markov) ---
+  # Se calcula el tiempo en alcanzar el umbral (para información adicional)
   if (m >= 2) {
     objetivo <- sim_base[, m] + sim_base[, max(1, m-1)]
     T_base <- which(objetivo >= umbral_objetivo)[1]
@@ -301,6 +322,7 @@ calcular_markov <- function(estados, orden_estados = NULL,
     T_base <- 10
   }
   
+  # --- Retornar resultados ---
   return(list(
     mat = P,
     dist_actual = dist_actual,
@@ -312,46 +334,50 @@ calcular_markov <- function(estados, orden_estados = NULL,
 }
 
 # ============================================================================
-# 3. calcular_juegos — Calcula masa crítica (teoría de juegos evolutiva)
+# 3. calcular_juegos — Calcula masa crítica (TEORÍA DE JUEGOS DINÁMICA CON α)
 # ============================================================================
  
-#' Calcular teoría de juegos y masa crítica
+#' Calcular teoría de juegos y masa crítica (dinámica con α)
 #'
-#' @param P matriz de transición de Markov (opcional)
-#' @param R_factor factor de recursos (defecto: 0.65)
+#' @param P matriz de transición de Markov (opcional, no se usa)
+#' @param R_factor factor de recursos (defecto: 0.65) — OBSOLETO, se mantiene por compatibilidad
+#' @param alpha indicador de acceso a salud (0-1). Si no se proporciona, usa 0.60 por defecto.
 #' @return lista con masa crítica e índice
 #' @export
-calcular_juegos <- function(P = NULL, R_factor = 0.65) {
+calcular_juegos <- function(P = NULL, R_factor = 0.65, alpha = NULL) {
   
-  # --- Matriz de pagos (fija por diseño del modelo) ---
+  # --- Si no se proporciona alpha, usar valor por defecto ---
+  if (is.null(alpha) || is.na(alpha)) {
+    alpha <- 0.60
+  }
+  
+  # --- Matriz de pagos DINÁMICA (depende de α) ---
   # Estos valores representan la interacción social entre adoptantes (A) y resistentes (R)
   a_AA <- 2.0   # Refuerzo mutuo entre adoptantes
-  a_AR <- -0.5  # Presión social negativa sobre el adoptante aislado
-  a_RA <- 1.0   # El resistente se beneficia del ejemplo ajeno
-  a_RR <- 0.5   # Refuerzo mutuo de la inacción
+  a_AR <- -(0.5 + 0.5 * (1 - alpha))  # Presión social negativa sobre el adoptante aislado
+  a_RA <- 0.5 + 0.5 * alpha           # El resistente se beneficia del ejemplo ajeno
+  a_RR <- 0.5 + 0.5 * (1 - alpha)     # Refuerzo mutuo de la inacción
   
   # --- Calcular masa crítica (p*) ---
   # p* es el umbral mínimo de adoptantes para que la conducta sea auto-sostenible.
-  # Ecuación (Sección 3.5.3 / 2.4 del artículo): p* = (a_RR - a_AR) / (a_AA - a_AR - a_RA + a_RR)
-  p_star <- (a_RR - a_AR) / (a_AA - a_AR - a_RA + a_RR)
+  # Ecuación: p* = (a_RR - a_AR) / (a_AA - a_AR - a_RA + a_RR)
+  numerador <- a_RR - a_AR
+  denominador <- a_AA - a_AR - a_RA + a_RR
+  p_star <- numerador / denominador
   p_star <- max(0, min(1, p_star))
   
-  # NOTA IMPORTANTE — R_factor NO se aplica aquí.
-  # El artículo (Sección 3.5.4 / 2.5) especifica un único punto donde entra el
-  # factor de disponibilidad de recursos: k = min(1, I_MPCS * R_factor * 1.5),
-  # calculado en calcular_indice(). Aplicarlo también dentro de p* duplicaba
-  # su efecto (doble conteo) e inflaba I_Juegos y, en cascada, I_MPCS.
-  # R_factor se mantiene como argumento por compatibilidad de firma con las
-  # llamadas existentes en server(), pero no se usa en este cálculo.
-  
   # --- Índice de juegos ---
-  # I_Juegos = p*, sin inversión ni transformación adicional (artículo, 3.5.3):
-  # "Este valor de p* ingresa sin transformación adicional como I_Juegos".
+  # I_Juegos = p*
   score <- p_star
   
   return(list(
     p_star = p_star,
-    score = score
+    score = score,
+    alpha = alpha,
+    a_AA = a_AA,
+    a_AR = a_AR,
+    a_RA = a_RA,
+    a_RR = a_RR
   ))
 }
 
@@ -362,8 +388,8 @@ calcular_juegos <- function(P = NULL, R_factor = 0.65) {
 #' Calcular Índice MPCS y tipo de nudge
 #'
 #' @param I_grafo índice del módulo de grafos
-#' @param I_markov índice del módulo de Markov
-#' @param I_juegos índice del módulo de juegos
+#' @param I_markov índice del módulo de Markov (Opción B: H=10)
+#' @param I_juegos índice del módulo de juegos (dinámico con α)
 #' @param w1 ponderador para grafos (defecto: 0.35)
 #' @param w2 ponderador para Markov (defecto: 0.40)
 #' @param w3 ponderador para juegos (defecto: 0.25)
