@@ -151,17 +151,19 @@ calcular_grafo <- function(datos, variables, umbral = 0.10) {
 }
 
 # ============================================================================
-# 2. calcular_markov — Estima cadena de Markov y tiempo de convergencia
+# 2. calcular_markov — Estima cadena de Markov (OPCIÓN B: horizonte fijo H=10)
 # ============================================================================
 
-#' Calcular cadena de Markov y tiempo de convergencia
+#' Calcular cadena de Markov y convergencia (Opción B)
 #'
 #' @param estados vector con los estados de cada individuo
 #' @param orden_estados vector con el orden progresivo de estados (opcional)
 #' @param umbral_objetivo proporción para considerar convergencia (defecto: 0.50)
-#' @return lista con matriz P, simulación, tiempo de convergencia e índice
+#' @param horizonte número de períodos para proyectar (defecto: 10)
+#' @return lista con matriz P, simulación, índice de Markov y tiempo de referencia
 #' @export
-calcular_markov <- function(estados, orden_estados = NULL, umbral_objetivo = 0.50) {
+calcular_markov <- function(estados, orden_estados = NULL, 
+                            umbral_objetivo = 0.50, horizonte = 10) {
   
   # --- Validaciones ---
   if (missing(estados)) {
@@ -170,8 +172,8 @@ calcular_markov <- function(estados, orden_estados = NULL, umbral_objetivo = 0.5
       mat = NULL,
       dist_actual = NULL,
       sim_base = NULL,
-      T_base = 10,
-      score = 0.3
+      T_base = horizonte,
+      score = 0.50
     ))
   }
   
@@ -184,8 +186,8 @@ calcular_markov <- function(estados, orden_estados = NULL, umbral_objetivo = 0.5
       mat = NULL,
       dist_actual = NULL,
       sim_base = NULL,
-      T_base = 10,
-      score = 0.3
+      T_base = horizonte,
+      score = 0.50
     ))
   }
   
@@ -194,16 +196,13 @@ calcular_markov <- function(estados, orden_estados = NULL, umbral_objetivo = 0.5
   
   # Si no se especifica orden, intentar ordenar automáticamente
   if (is.null(orden_estados)) {
-    # Intentar ordenar como E1, E2, E3, ...
     if (all(grepl("^E[0-9]+$", estados_unicos))) {
       orden_estados <- estados_unicos[order(as.numeric(gsub("E", "", estados_unicos)))]
     } else {
-      # Ordenar por frecuencia (de más a menos común)
       freq <- table(estados_clean)
       orden_estados <- names(sort(freq, decreasing = TRUE))
     }
   } else {
-    # Verificar que todos los estados estén en el orden
     faltantes <- setdiff(estados_unicos, orden_estados)
     if (length(faltantes) > 0) {
       orden_estados <- c(orden_estados, faltantes)
@@ -218,8 +217,8 @@ calcular_markov <- function(estados, orden_estados = NULL, umbral_objetivo = 0.5
       mat = NULL,
       dist_actual = NULL,
       sim_base = NULL,
-      T_base = 10,
-      score = 0.3
+      T_base = horizonte,
+      score = 0.50
     ))
   }
   
@@ -234,21 +233,14 @@ calcular_markov <- function(estados, orden_estados = NULL, umbral_objetivo = 0.5
     }
   }
   
-  # --- Construir matriz de transición ---
-  # En ausencia de datos longitudinales, se usan supuestos de progresión conservadores
+  # --- Construir matriz de transición genérica ---
   P <- matrix(0, nrow = m, ncol = m)
   colnames(P) <- orden_estados
   rownames(P) <- orden_estados
   
   for (i in 1:(m-1)) {
-    # Probabilidad de avanzar al siguiente estado
-    # Mayor probabilidad de avance desde estados tempranos
     prob_avance <- 0.30 + 0.20 * (1 - i/m)
-    
-    # Probabilidad de permanecer
     prob_quedarse <- 0.50 - 0.15 * (i/m)
-    
-    # Probabilidad de retroceder (pequeña)
     prob_retroceso <- 0.10 * (1 - i/m)
     
     P[i, i] <- prob_quedarse
@@ -258,7 +250,6 @@ calcular_markov <- function(estados, orden_estados = NULL, umbral_objetivo = 0.5
       P[i, i-1] <- prob_retroceso
     }
     
-    # Distribuir el resto entre otros estados
     resto <- 1 - sum(P[i, ])
     if (resto > 0) {
       otros <- setdiff(1:m, c(i, i+1, if (i > 1) i-1 else NULL))
@@ -268,11 +259,8 @@ calcular_markov <- function(estados, orden_estados = NULL, umbral_objetivo = 0.5
     }
   }
   
-  # Último estado: alta permanencia (la conducta está consolidada)
   P[m, m] <- 0.85
   P[m, 1:(m-1)] <- (1 - 0.85) / (m - 1)
-  
-  # Normalizar filas para asegurar que suman 1
   P <- P / rowSums(P)
   
   # --- Simular cadena de Markov ---
@@ -289,12 +277,23 @@ calcular_markov <- function(estados, orden_estados = NULL, umbral_objetivo = 0.5
   
   sim_base <- simular(P, dist_actual)
   
-  # --- Calcular tiempo de convergencia ---
-  # Se considera "convergencia" cuando los últimos dos estados alcanzan el umbral
+  # ============================================================
+  # [OPCIÓN B] I_Markov = adherencia en horizonte fijo H
+  # ============================================================
+  
+  idx_h <- min(horizonte + 1, nrow(sim_base))
+  
+  if (m >= 2) {
+    score <- sim_base[idx_h, m] + sim_base[idx_h, max(1, m-1)]
+  } else {
+    score <- sim_base[idx_h, m]
+  }
+  score <- max(0, min(1, score))
+  
+  # T_base se mantiene para referencia
   if (m >= 2) {
     objetivo <- sim_base[, m] + sim_base[, max(1, m-1)]
     T_base <- which(objetivo >= umbral_objetivo)[1]
-    
     if (is.na(T_base) || is.infinite(T_base)) {
       T_base <- 20
     }
@@ -302,17 +301,13 @@ calcular_markov <- function(estados, orden_estados = NULL, umbral_objetivo = 0.5
     T_base <- 10
   }
   
-  # --- Índice Markov (urgencia temporal) ---
-  # Menor T = mayor urgencia = mayor I_Markov
-  score <- 1 - exp(-T_base / 20)
-  
-  # --- Retornar resultados ---
   return(list(
     mat = P,
     dist_actual = dist_actual,
     sim_base = sim_base,
     T_base = T_base,
-    score = score
+    score = score,
+    horizonte = horizonte
   ))
 }
 
