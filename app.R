@@ -738,12 +738,14 @@ server <- function(input, output, session) {
         r <- results_list[[g]]
         if (!is.null(r$markov_mat) && !is.null(r$sim_base)) {
           P_n <- r$markov_mat
-          for (i in 1:(nrow(P_n)-1)) {
-            av <- P_n[i, i] * 0.4
-            P_n[i, i] <- P_n[i, i] - av
-            P_n[i, i+1] <- P_n[i, i+1] + av
-            P_n[i, ] <- P_n[i, ] / sum(P_n[i, ])
-          }
+          # Usar el k calculado por el modelo para este grupo
+k_nudge <- r$k  # r$k viene de index_res$k
+if (is.na(k_nudge) || k_nudge < 0 || k_nudge > 1) k_nudge <- 0.4
+
+for (i in 1:(nrow(P_n)-1)) {
+  av <- P_n[i, i] * k_nudge
+  ...
+}
           sim_nudge <- r$sim_base
           for (j in 2:nrow(sim_nudge)) {
             sim_nudge[j, ] <- sim_nudge[j-1, ] %*% P_n
