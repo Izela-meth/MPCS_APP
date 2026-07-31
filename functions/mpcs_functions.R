@@ -1330,5 +1330,131 @@ resumen_sensibilidad <- function(resultado_sens, idioma = "es") {
 }
 
 # ============================================================================
+# 16. seleccionar_umbral_bootstrap — Selección de umbral por estabilidad
+# ============================================================================
+
+#' Seleccionar umbral de correlación por bootstrap stability (Jaccard similarity)
+#'
+#' @param datos data.frame con los datos
+#' @param variables vector con nombres de columnas a incluir en el grafo
+#' @param umbrales vector con umbrales a evaluar (defecto: seq(0.05, 0.20, 0.01))
+#' @param n_boot número de remuestreos bootstrap (defecto: 100)
+#' @param seed semilla para reproducibilidad (defecto: 123)
+#' @param criterio_jaccard umbral mínimo de Jaccard para considerar estable (defecto: 0.70)
+#' @return lista con umbral óptimo, estabilidad por umbral, y nodos óptimos
+#' @export
+seleccionar_umbral_bootstrap <- function(datos, variables, 
+                                         umbrales = seq(0.05, 0.20, 0.01),
+                                         n_boot = 100,
+                                         seed = 123,
+                                         criterio_jaccard = 0.70) {
+  
+  if (!requireNamespace("igraph", quietly = TRUE)) {
+    stop("Se requiere el paquete igraph")
+  }
+  
+  set.seed(seed)
+  n <- nrow(datos)
+  
+  resultados <- data.frame()
+  
+  for (umbral in umbrales) {
+    
+    # --- 1. Grafo con datos originales ---
+    res_original <- calcular_grafo(datos, variables, umbral = umbral)
+    nodo_original <- res_original$optimal_node
+    if (is.na(nodo_original) || is.null(nodo_original)) nodo_original <- "Sin_nodo"
+    
+    # --- 2. Bootstrap ---
+    nodos_boot <- character()
+    aristas_boot <- list()
+    
+    for (b in 1:n_boot) {
+      # Remuestrear filas con reemplazo
+      idx_boot <- sample(1:n, size = n, replace = TRUE)
+      datos_boot <- datos[idx_boot, , drop = FALSE]
+      
+      # Construir grafo con el umbral actual
+      res_boot <- calcular_grafo(datos_boot, variables, umbral = umbral)
+      nodo_boot <- res_boot$optimal_node
+      if (is.na(nodo_boot) || is.null(nodo_boot)) nodo_boot <- "Sin_nodo"
+      nodos_boot <- c(nodos_boot, nodo_boot)
+      
+      # Guardar aristas si hay grafo
+      if (!is.null(res_boot$graph)) {
+        aristas_boot[[b]] <- igraph::as_edgelist(res_boot$graph)
+      } else {
+        aristas_boot[[b]] <- matrix(0, nrow = 0, ncol = 2)
+      }
+    }
+    
+    # --- 3. Calcular Jaccard para aristas ---
+    jaccards <- numeric()
+    for (b in 1:(n_boot - 1)) {
+      for (c in (b + 1):n_boot) {
+        E_b <- aristas_boot[[b]]
+        E_c <- aristas_boot[[c]]
+        
+        # Si ambos están vacíos, Jaccard = 1
+        if (nrow(E_b) == 0 && nrow(E_c) == 0) {
+          jaccard <- 1
+        } else if (nrow(E_b) == 0 || nrow(E_c) == 0) {
+          jaccard <- 0
+        } else {
+          # Convertir a conjuntos de strings para comparar
+          set_b <- apply(E_b, 1, function(x) paste(sort(x), collapse = "_"))
+          set_c <- apply(E_c, 1, function(x) paste(sort(x), collapse = "_"))
+          
+          interseccion <- length(intersect(set_b, set_c))
+          union <- length(union(set_b, set_c))
+          jaccard <- interseccion / union
+        }
+        jaccards <- c(jaccards, jaccard)
+      }
+    }
+    
+    jaccard_promedio <- mean(jaccards, na.rm = TRUE)
+    
+    # --- 4. Estabilidad del nodo óptimo ---
+    freq_nodos <- table(nodos_boot)
+    nodo_mas_frecuente <- names(freq_nodos)[which.max(freq_nodos)]
+    pct_nodo_mas_frecuente <- max(freq_nodos) / n_boot * 100
+    
+    # --- 5. Guardar resultados ---
+    resultados <- rbind(resultados, data.frame(
+      Umbral = umbral,
+      Nodo_Original = nodo_original,
+      Nodo_Mas_Frecuente = nodo_mas_frecuente,
+      Pct_Nodo_Estable = round(pct_nodo_mas_frecuente, 1),
+      Jaccard_Promedio = round(jaccard_promedio, 4),
+      Cumple_Criterio = jaccard_promedio >= criterio_jaccard & pct_nodo_mas_frecuente >= 70
+    ))
+  }
+  
+  # --- 6. Seleccionar umbral óptimo ---
+  # Priorizar: Jaccard > criterio, luego mayor estabilidad del nodo
+  resultados_filtrados <- resultados[resultados$Cumple_Criterio, ]
+  
+  if (nrow(resultados_filtrados) > 0) {
+    # Seleccionar el que maximiza Jaccard + estabilidad
+    idx_optimo <- which.max(resultados_filtrados$Jaccard_Promedio + resultados_filtrados$Pct_Nodo_Estable / 100)
+    umbral_optimo <- resultados_filtrados$Umbral[idx_optimo]
+  } else {
+    # Si ninguno cumple, seleccionar el de mayor Jaccard
+    idx_optimo <- which.max(resultados$Jaccard_Promedio)
+    umbral_optimo <- resultados$Umbral[idx_optimo]
+    warning("Ningún umbral cumple con el criterio de estabilidad. Seleccionado el de mayor Jaccard.")
+  }
+  
+  return(list(
+    umbral_optimo = umbral_optimo,
+    resultados = resultados,
+    criterio_jaccard = criterio_jaccard,
+    n_boot = n_boot,
+    nodo_original = resultados$Nodo_Original[which(resultados$Umbral == umbral_optimo)[1]],
+    nodo_mas_frecuente = resultados$Nodo_Mas_Frecuente[which(resultados$Umbral == umbral_optimo)[1]]
+  ))
+}   
+# ============================================================================
 # FIN DEL ARCHIVO
 # ============================================================================
