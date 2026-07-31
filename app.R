@@ -639,25 +639,26 @@ server <- function(input, output, session) {
           R_factor = input$R_factor
         )
         
-        results_list[[as.character(g)]] <- list(
-          grupo = g,
-          n = nrow(sub),
-          nodo_optimo = if (is.null(graph_res$optimal_node)) "Sin nodo" else graph_res$optimal_node,
-          I_grafo = graph_res$score,
-          I_markov = markov_res$score,
-          I_juegos = games_res$score,
-          alpha = alpha_grupo,
-          I_MPCS = index_res$I_MPCS,
-          k = index_res$k,
-          tipo = index_res$nudge_type,
-          graph = graph_res$graph,
-          graph_data = graph_data,
-          markov_mat = markov_res$mat,
-          sim_base = markov_res$sim_base,
-          dist_actual = markov_res$dist_actual,
-          T_base = markov_res$T_base,
-          estados = colnames(markov_res$mat)
-        )
+results_list[[as.character(g)]] <- list(
+  grupo = g,
+  n = nrow(sub),
+  nodo_optimo = if (is.null(graph_res$optimal_node)) "Sin nodo" else graph_res$optimal_node,
+  I_grafo = graph_res$score,
+  I_markov = markov_res$score,
+  I_juegos = games_res$score,
+  alpha = alpha_grupo,
+  I_MPCS = index_res$I_MPCS,
+  k = index_res$k,
+  tipo = index_res$nudge_type,
+  graph = graph_res$graph,
+  graph_data = graph_data,
+  markov_mat = markov_res$mat,
+  sim_base = markov_res$sim_base,
+  dist_actual = markov_res$dist_actual,
+  T_base = markov_res$T_base,
+  # --- GUARDAR ESTADOS CORRECTAMENTE ---
+  estados = colnames(markov_res$mat)  # Esto debe tener los nombres correctos
+)
       }
       
       if (length(results_list) == 0) {
