@@ -792,20 +792,28 @@ server <- function(input, output, session) {
                annotate("text", x = 0.5, y = 0.5, label = "No hay datos para trayectorias"))
     }
     
-    # --- Árbol de Markov ---
-    p_arbol <- function() {
-      if (!is.null(r$markov_mat)) {
-        estados <- if (!is.null(r$estados)) r$estados else colnames(r$markov_mat)
-        return(graficar_arbol_markov(
-          r$markov_mat, 
-          estados,
-          umbral_prob = 0.05,
-          titulo = paste("Árbol de Transición —", first_group)
-        ))
-      }
-      return(ggplot() + theme_void() + 
-               annotate("text", x = 0.5, y = 0.5, label = "No hay datos para árbol de Markov"))
+ # --- Árbol de Markov (CORREGIDO) ---
+p_arbol <- function() {
+  if (!is.null(r$markov_mat)) {
+    # Obtener estados de la matriz o de r$estados
+    if (!is.null(r$estados) && length(r$estados) == ncol(r$markov_mat)) {
+      estados_arbol <- r$estados
+    } else if (!is.null(colnames(r$markov_mat))) {
+      estados_arbol <- colnames(r$markov_mat)
+    } else {
+      estados_arbol <- paste0("E", 1:ncol(r$markov_mat))
     }
+    
+    return(graficar_arbol_markov(
+      r$markov_mat, 
+      estados = estados_arbol,
+      umbral_prob = 0.05,
+      titulo = paste("Árbol de Transición —", first_group)
+    ))
+  }
+  return(ggplot() + theme_void() + 
+           annotate("text", x = 0.5, y = 0.5, label = "No hay datos para árbol de Markov"))
+}
     
     # --- Juego evolutivo ---
     p_juego <- function() {
