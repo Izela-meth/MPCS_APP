@@ -625,80 +625,53 @@ server <- function(input, output, session) {
     return(max(0, min(1, alpha)))
   }
   
-  # ==========================================================================
-  # [NUEVO] ANALISIS DE BOOTSTRAP PARA SELECCIÓN DE UMBRAL
-  # ==========================================================================
-  observeEvent(input$run_bootstrap, {
-    req(rv$data)
+# ==========================================================================
+# [CORREGIDO] ANALISIS DE BOOTSTRAP CON PROGRESO REAL
+# ==========================================================================
+observeEvent(input$run_bootstrap, {
+  req(rv$data)
+  
+  if (is.null(input$graph_vars) || length(input$graph_vars) < 5) {
+    showNotification("Select at least 5 variables for the graph.", type = "error")
+    return()
+  }
+  
+  withProgress(message = 'Running bootstrap...', value = 0, {
     
-    if (is.null(input$graph_vars) || length(input$graph_vars) < 5) {
-      showNotification("Select at least 5 variables for the graph.", type = "error")
-      return()
+    datos <- rv$data
+    variables <- input$graph_vars
+    n_boot <- input$boot_n_sim
+    
+    # --- Función de progreso ---
+    progress_callback <- function(progress) {
+      incProgress(
+        amount = progress - getProgress()$value,  # Incremento desde el último valor
+        detail = paste0(round(progress * 100, 0), "% completed")
+      )
     }
     
-    withProgress(message = 'Running bootstrap...', value = 0, {
-      incProgress(0.1, detail = "Preparing...")
-      
-      datos <- rv$data
-      variables <- input$graph_vars
-      
-      incProgress(0.3, detail = "Calculating threshold stability...")
-      
-      resultado_boot <- seleccionar_umbral_bootstrap(
-        datos = datos,
-        variables = variables,
-        umbrales = seq(0.05, 0.20, 0.01),
-        n_boot = input$boot_n_sim,
-        seed = 123,
-        criterio_jaccard = 0.70
-      )
-      
-      incProgress(0.8, detail = "Generating results...")
-      
-      rv$bootstrap_resultado <- resultado_boot
-      
-      incProgress(1, detail = "Completed")
-    })
+    incProgress(0.05, detail = "Preparing data...")
     
-    showNotification("Bootstrap completed.", type = "message")
+    # --- Ejecutar bootstrap ---
+    resultado_boot <- seleccionar_umbral_bootstrap(
+      datos = datos,
+      variables = variables,
+      umbrales = seq(0.05, 0.20, 0.01),
+      n_boot = n_boot,
+      seed = 123,
+      criterio_jaccard = 0.70,
+      progress_callback = progress_callback
+    )
+    
+    incProgress(0.95, detail = "Generating results...")
+    
+    rv$bootstrap_resultado <- resultado_boot
+    
+    incProgress(1.0, detail = "Completed!")
   })
   
-  # Salidas de bootstrap
-  output$bootstrap_results <- renderPrint({
-    req(rv$bootstrap_resultado)
-    
-    res <- rv$bootstrap_resultado
-    
-    cat("=== BOOTSTRAP THRESHOLD SELECTION ===\n\n")
-    cat(sprintf("Number of replicates: %d\n", res$n_boot))
-    cat(sprintf("Jaccard criterion: %.2f\n", res$criterio_jaccard))
-    cat(sprintf("\nOptimal threshold: %.2f\n", res$umbral_optimo))
-    cat(sprintf("   Original node: %s\n", res$nodo_original))
-    cat(sprintf("   Most frequent node in bootstrap: %s\n", res$nodo_mas_frecuente))
-    
-    cat("\n--- Stability by threshold ---\n")
-    print(res$resultados[, c("Umbral", "Jaccard_Promedio", "Pct_Nodo_Estable", "Cumple_Criterio")])
-  })
-  
-  output$bootstrap_plot <- renderPlot({
-    req(rv$bootstrap_resultado)
-    
-    res <- rv$bootstrap_resultado
-    df <- res$resultados
-    
-    ggplot(df, aes(x = Umbral)) +
-      geom_line(aes(y = Jaccard_Promedio, color = "Jaccard"), linewidth = 1.2) +
-      geom_point(aes(y = Jaccard_Promedio, color = "Jaccard"), size = 2) +
-      geom_vline(xintercept = res$umbral_optimo, linetype = "dashed", color = "#C0392B", linewidth = 1) +
-      annotate("text", x = res$umbral_optimo + 0.008, y = max(df$Jaccard_Promedio) * 0.9,
-               label = paste0("Optimal = ", round(res$umbral_optimo, 2)),
-               color = "#C0392B", fontface = "bold", hjust = 0) +
-      scale_y_continuous(labels = scales::percent, limits = c(0, 1)) +
-      labs(title = "Graph stability by threshold (Jaccard)",
-           x = "Correlation threshold", y = "Jaccard similarity") +
-      theme_minimal(base_size = 11) +
-      theme(legend.position = "bottom")
-  })
+  showNotification("Bootstrap completed successfully!", type = "message")
+})
   
   # ==========================================================================
   # FUNCION PARA PROCESAR TASAS DE AVANCE
