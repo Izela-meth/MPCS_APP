@@ -456,7 +456,7 @@ generar_demo_data <- function(n = 1000, seed = 123) {
 #' @param titulo título del gráfico
 #' @return objeto ggplot
 #' @export
-graficar_arbol_markov <- function(P, estados, umbral_prob = 0.05, 
+graficar_arbol_markov <- function(P, estados = NULL, umbral_prob = 0.05, 
                                   titulo = "Árbol de Transición de Markov") {
   
   if (!requireNamespace("ggplot2", quietly = TRUE)) {
@@ -466,7 +466,7 @@ graficar_arbol_markov <- function(P, estados, umbral_prob = 0.05,
     stop("Se requiere el paquete igraph")
   }
   
-  if (is.null(P) || is.null(estados) || nrow(P) < 2) {
+  if (is.null(P) || nrow(P) < 2) {
     return(ggplot2::ggplot() + ggplot2::theme_void() + 
              ggplot2::annotate("text", x = 0.5, y = 0.5, 
                               label = "No hay datos para el árbol de Markov",
@@ -475,10 +475,21 @@ graficar_arbol_markov <- function(P, estados, umbral_prob = 0.05,
   
   m <- nrow(P)
   
-  if (is.null(colnames(P))) {
-    estados <- paste0("E", 1:m)
+  # --- OBTENER NOMBRES DE ESTADOS ---
+  if (!is.null(estados) && length(estados) == m) {
+    estados_nombres <- estados
+  } else if (!is.null(colnames(P)) && all(colnames(P) != "")) {
+    estados_nombres <- colnames(P)
   } else {
-    estados <- colnames(P)
+    estados_nombres <- paste0("E", 1:m)
+  }
+  
+  # --- Limpiar nombres para mostrar ---
+  estados_mostrar <- estados_nombres
+  for (i in 1:length(estados_mostrar)) {
+    if (nchar(estados_mostrar[i]) > 12) {
+      estados_mostrar[i] <- substr(estados_mostrar[i], 1, 10)
+    }
   }
   
   # --- Crear aristas con transiciones relevantes ---
@@ -486,16 +497,13 @@ graficar_arbol_markov <- function(P, estados, umbral_prob = 0.05,
   for (i in 1:m) {
     for (j in 1:m) {
       if (P[i, j] >= umbral_prob && i != j) {
-        nombre_from <- estados[i]
-        nombre_to <- estados[j]
-        if (nchar(nombre_from) > 12) nombre_from <- substr(nombre_from, 1, 10)
-        if (nchar(nombre_to) > 12) nombre_to <- substr(nombre_to, 1, 10)
-        
         aristas <- rbind(aristas, data.frame(
-          from = nombre_from,
-          to = nombre_to,
+          from = estados_mostrar[i],
+          to = estados_mostrar[j],
           prob = round(P[i, j] * 100, 1),
-          prob_raw = P[i, j]
+          prob_raw = P[i, j],
+          from_idx = i,
+          to_idx = j
         ))
       }
     }
@@ -509,7 +517,7 @@ graficar_arbol_markov <- function(P, estados, umbral_prob = 0.05,
   }
   
   # --- Crear grafo ---
-  g <- igraph::graph_from_data_frame(aristas, directed = TRUE)
+  g <- igraph::graph_from_data_frame(aristas[, c("from", "to")], directed = TRUE)
   
   # --- Layout ---
   tryCatch({
@@ -519,8 +527,10 @@ graficar_arbol_markov <- function(P, estados, umbral_prob = 0.05,
   })
   
   # --- Escalar layout ---
-  layout[, 1] <- scale(layout[, 1]) * 2.5
-  layout[, 2] <- scale(layout[, 2]) * 2.5
+  if (nrow(layout) > 0) {
+    layout[, 1] <- scale(layout[, 1]) * 2.5
+    layout[, 2] <- scale(layout[, 2]) * 2.5
+  }
   
   coords <- data.frame(
     x = layout[, 1],
@@ -561,7 +571,6 @@ graficar_arbol_markov <- function(P, estados, umbral_prob = 0.05,
   
   # --- Graficar ---
   p <- ggplot2::ggplot() +
-    # Flechas de transición
     ggplot2::geom_curve(
       data = edge_data,
       aes(x = x, y = y, xend = xend, yend = yend),
@@ -571,7 +580,6 @@ graficar_arbol_markov <- function(P, estados, umbral_prob = 0.05,
       linewidth = 0.7,
       alpha = 0.5
     ) +
-    # Etiquetas de probabilidad (con fondo blanco para legibilidad)
     ggplot2::geom_label(
       data = edge_data,
       aes(x = (x + xend)/2, y = (y + yend)/2 + 0.08, 
@@ -584,7 +592,6 @@ graficar_arbol_markov <- function(P, estados, umbral_prob = 0.05,
       label.padding = unit(0.15, "lines"),
       alpha = 0.9
     ) +
-    # Nodos (estados)
     ggplot2::geom_point(
       data = coords,
       aes(x = x, y = y),
@@ -594,7 +601,6 @@ graficar_arbol_markov <- function(P, estados, umbral_prob = 0.05,
       shape = 21,
       stroke = 1.5
     ) +
-    # Etiquetas de nodos
     ggplot2::geom_text(
       data = coords,
       aes(x = x, y = y, label = name),
@@ -742,187 +748,106 @@ graficar_juego_evolutivo <- function(alpha = 0.60, p_star = NULL,
 # 9. graficar_trayectorias_markov — Trayectorias de Markov (CORREGIDO)
 # ============================================================================
 
-#' Graficar árbol de transición de Markov (VERSIÓN CORREGIDA)
+#' Graficar trayectorias de Markov (VERSIÓN CORREGIDA)
 #'
-#' @param P matriz de transición (m x m)
-#' @param estados vector con nombres de estados
-#' @param umbral_prob probabilidad mínima para mostrar una flecha (default: 0.05)
+#' @param sim_base simulación base
+#' @param sim_nudge simulación con nudge (opcional)
+#' @param estados nombres de los estados
 #' @param titulo título del gráfico
+#' @param y_label etiqueta del eje Y
 #' @return objeto ggplot
 #' @export
-graficar_arbol_markov <- function(P, estados, umbral_prob = 0.05, 
-                                  titulo = "Árbol de Transición de Markov") {
+graficar_trayectorias_markov <- function(sim_base, sim_nudge = NULL, 
+                                         estados = NULL, 
+                                         titulo = "Trayectorias de Markov",
+                                         y_label = "Probabilidad de ocupación") {
   
   if (!requireNamespace("ggplot2", quietly = TRUE)) {
     stop("Se requiere el paquete ggplot2")
   }
-  if (!requireNamespace("igraph", quietly = TRUE)) {
-    stop("Se requiere el paquete igraph")
+  if (!requireNamespace("tidyr", quietly = TRUE)) {
+    stop("Se requiere el paquete tidyr")
+  }
+  if (!requireNamespace("RColorBrewer", quietly = TRUE)) {
+    stop("Se requiere el paquete RColorBrewer")
   }
   
-  if (is.null(P) || nrow(P) < 2) {
-    return(ggplot2::ggplot() + ggplot2::theme_void() + 
-             ggplot2::annotate("text", x = 0.5, y = 0.5, 
-                              label = "No hay datos para el árbol de Markov",
-                              size = 5, color = "#7F8C8D"))
+  if (is.null(sim_base)) {
+    return(ggplot() + theme_void() + 
+             annotate("text", x = 0.5, y = 0.5, 
+                     label = "No hay datos para trayectorias",
+                     size = 5, color = "#7F8C8D"))
   }
   
-  m <- nrow(P)
+  if (is.null(estados)) {
+    estados <- colnames(sim_base)
+    if (is.null(estados)) {
+      estados <- paste0("E", 1:ncol(sim_base))
+    }
+  }
   
-  # --- OBTENER NOMBRES DE ESTADOS ---
-  # Si se proporcionan estados, usarlos. Si no, usar colnames(P) o crear genéricos
-  if (!is.null(estados) && length(estados) == m) {
-    # Usar los estados proporcionados
-    estados_nombres <- estados
-  } else if (!is.null(colnames(P)) && all(colnames(P) != "")) {
-    # Usar colnames de la matriz
-    estados_nombres <- colnames(P)
+  df_base <- as.data.frame(sim_base)
+  colnames(df_base) <- estados
+  df_base$Periodo <- 0:(nrow(df_base) - 1)
+  df_base$Escenario <- "Sin nudge"
+  
+  if (!is.null(sim_nudge) && nrow(sim_nudge) == nrow(sim_base)) {
+    df_nudge <- as.data.frame(sim_nudge)
+    if (ncol(df_nudge) == length(estados)) {
+      colnames(df_nudge) <- estados
+      df_nudge$Periodo <- 0:(nrow(df_nudge) - 1)
+      df_nudge$Escenario <- "Con nudge"
+      df_combined <- rbind(df_base, df_nudge)
+    } else {
+      df_combined <- df_base
+    }
   } else {
-    # Crear nombres genéricos
-    estados_nombres <- paste0("E", 1:m)
+    df_combined <- df_base
   }
   
-  # --- Limpiar nombres para mostrar (acortar si son muy largos) ---
-  estados_mostrar <- estados_nombres
-  for (i in 1:length(estados_mostrar)) {
-    if (nchar(estados_mostrar[i]) > 12) {
-      estados_mostrar[i] <- substr(estados_mostrar[i], 1, 10)
-    }
-  }
-  
-  # --- Crear aristas con transiciones relevantes ---
-  aristas <- data.frame()
-  for (i in 1:m) {
-    for (j in 1:m) {
-      if (P[i, j] >= umbral_prob && i != j) {
-        aristas <- rbind(aristas, data.frame(
-          from = estados_mostrar[i],
-          to = estados_mostrar[j],
-          prob = round(P[i, j] * 100, 1),
-          prob_raw = P[i, j],
-          from_idx = i,
-          to_idx = j
-        ))
-      }
-    }
-  }
-  
-  if (nrow(aristas) == 0) {
-    return(ggplot2::ggplot() + ggplot2::theme_void() + 
-             ggplot2::annotate("text", x = 0.5, y = 0.5, 
-                              label = paste0("No hay transiciones ≥ ", round(umbral_prob*100, 0), "%"),
-                              size = 5, color = "#7F8C8D"))
-  }
-  
-  # --- Crear grafo ---
-  g <- igraph::graph_from_data_frame(aristas[, c("from", "to")], directed = TRUE)
-  
-  # --- Layout ---
-  tryCatch({
-    layout <- igraph::layout_as_tree(g, root = 1, circular = FALSE)
-  }, error = function(e) {
-    layout <- igraph::layout_with_fr(g, niter = 1000)
-  })
-  
-  # --- Escalar layout ---
-  if (nrow(layout) > 0) {
-    layout[, 1] <- scale(layout[, 1]) * 2.5
-    layout[, 2] <- scale(layout[, 2]) * 2.5
-  }
-  
-  coords <- data.frame(
-    x = layout[, 1],
-    y = layout[, 2],
-    name = igraph::V(g)$name
+  df_long <- tidyr::pivot_longer(
+    df_combined,
+    cols = all_of(estados),
+    names_to = "Estado",
+    values_to = "Probabilidad"
   )
   
-  # --- Crear edge_data ---
-  edge_data <- data.frame()
-  for (i in 1:nrow(aristas)) {
-    from_idx <- which(coords$name == aristas$from[i])
-    to_idx <- which(coords$name == aristas$to[i])
-    if (length(from_idx) > 0 && length(to_idx) > 0) {
-      edge_data <- rbind(edge_data, data.frame(
-        x = coords$x[from_idx],
-        y = coords$y[from_idx],
-        xend = coords$x[to_idx],
-        yend = coords$y[to_idx],
-        prob = aristas$prob[i],
-        prob_raw = aristas$prob_raw[i]
-      ))
-    }
+  n_estados <- length(estados)
+  colores <- RColorBrewer::brewer.pal(min(n_estados, 8), "Set1")
+  if (n_estados > 8) {
+    colores <- colorRampPalette(colores)(n_estados)
   }
   
-  if (nrow(edge_data) == 0) {
-    return(ggplot2::ggplot() + ggplot2::theme_void() + 
-             ggplot2::annotate("text", x = 0.5, y = 0.5, 
-                              label = "Error al generar el árbol",
-                              size = 5, color = "#7F8C8D"))
-  }
-  
-  # --- Tamaño de nodos según grado ---
-  node_degrees <- table(c(as.character(aristas$from), as.character(aristas$to)))
-  node_size <- ifelse(coords$name %in% names(node_degrees), 
-                      18 + node_degrees[coords$name] * 2, 
-                      20)
-  node_size <- pmin(30, pmax(16, node_size))
-  
-  # --- Graficar ---
-  p <- ggplot2::ggplot() +
-    # Flechas de transición
-    ggplot2::geom_curve(
-      data = edge_data,
-      aes(x = x, y = y, xend = xend, yend = yend),
-      curvature = 0.15,
-      arrow = arrow(length = unit(0.2, "cm"), type = "closed"),
-      color = "#2C3E50",
-      linewidth = 0.7,
-      alpha = 0.5
+  p <- ggplot(df_long, aes(x = Periodo, y = Probabilidad, 
+                           color = Estado, linetype = Escenario)) +
+    geom_line(linewidth = 1.2) +
+    scale_y_continuous(
+      labels = scales::percent_format(accuracy = 1), 
+      limits = c(0, 1),
+      breaks = seq(0, 1, by = 0.1)
     ) +
-    # Etiquetas de probabilidad (con fondo blanco para legibilidad)
-    ggplot2::geom_label(
-      data = edge_data,
-      aes(x = (x + xend)/2, y = (y + yend)/2 + 0.08, 
-          label = paste0(prob, "%")),
-      size = 3.5,
-      fill = "white",
-      color = "#C0392B",
-      fontface = "bold",
-      label.size = 0.3,
-      label.padding = unit(0.15, "lines"),
-      alpha = 0.9
+    scale_x_continuous(
+      breaks = seq(0, max(df_long$Periodo), by = max(1, round(max(df_long$Periodo)/6)))
     ) +
-    # Nodos (estados)
-    ggplot2::geom_point(
-      data = coords,
-      aes(x = x, y = y),
-      size = node_size,
-      color = "#2C3E50",
-      fill = "#D6EAF8",
-      shape = 21,
-      stroke = 1.5
-    ) +
-    # Etiquetas de nodos
-    ggplot2::geom_text(
-      data = coords,
-      aes(x = x, y = y, label = name),
-      size = 4,
-      fontface = "bold",
-      color = "#1A3A5C"
-    ) +
-    ggplot2::labs(
+    scale_color_manual(values = colores) +
+    scale_linetype_manual(values = c("Sin nudge" = "solid", "Con nudge" = "dashed")) +
+    labs(
       title = titulo,
-      subtitle = paste0("Transiciones con probabilidad ≥ ", round(umbral_prob * 100, 0), "%"),
-      x = "", y = ""
+      subtitle = "Muestra la proporción esperada de individuos en cada estado a lo largo del tiempo",
+      x = "Período (unidades de tiempo)",
+      y = y_label,
+      color = "Estado conductual",
+      linetype = "Escenario"
     ) +
-    ggplot2::theme_minimal(base_size = 11) +
-    ggplot2::theme(
-      axis.text = element_blank(),
-      axis.ticks = element_blank(),
-      panel.grid = element_blank(),
-      plot.title = element_text(face = "bold", size = 14, hjust = 0.5),
+    theme_minimal(base_size = 13) +
+    theme(
+      legend.position = "bottom",
+      legend.box = "vertical",
+      plot.title = element_text(face = "bold", size = 15, hjust = 0.5),
       plot.subtitle = element_text(size = 11, hjust = 0.5, color = "#7F8C8D"),
-      plot.margin = margin(10, 20, 10, 20)
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      panel.grid.minor = element_blank(),
+      panel.grid.major = element_line(color = "#EAECEE", linewidth = 0.5)
     )
   
   return(p)
