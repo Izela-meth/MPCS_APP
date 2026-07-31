@@ -744,7 +744,6 @@ if (is.na(k_nudge) || k_nudge < 0 || k_nudge > 1) k_nudge <- 0.4
 
 for (i in 1:(nrow(P_n)-1)) {
   av <- P_n[i, i] * k_nudge
-  ...
 }
           sim_nudge <- r$sim_base
           for (j in 2:nrow(sim_nudge)) {
