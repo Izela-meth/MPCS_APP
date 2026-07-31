@@ -499,40 +499,32 @@ server <- function(input, output, session) {
   })
   
   # ==========================================================================
-  # FUNCION PARA DETECTAR ORDEN LOGICO DE ESTADOS (MEJORADA)
+  # FUNCION PARA DETECTAR ORDEN LOGICO DE ESTADOS
   # ==========================================================================
   detectar_orden_estados <- function(estados_unicos) {
     
-    # --- Caso 1: Estados de salud (E1, E2, E3, E4, E5) ---
     if (all(grepl("^E[0-9]+$", estados_unicos))) {
       return(estados_unicos[order(as.numeric(gsub("E", "", estados_unicos)))])
     }
     
-    # --- Caso 2: Estados de participacion en aula ---
     orden_aula <- c("Nunca", "Rara_vez", "A_veces", "Casi_siempre")
     if (any(orden_aula %in% estados_unicos)) {
-      # Devolver SOLO los que estan presentes, en el orden correcto
       return(orden_aula[orden_aula %in% estados_unicos])
     }
     
-    # --- Caso 3: Estados con "Bajo", "Medio", "Alto" ---
     orden_bma <- c("Bajo", "Medio", "Alto")
     if (any(orden_bma %in% estados_unicos)) {
       return(orden_bma[orden_bma %in% estados_unicos])
     }
     
-    # --- Caso 4: Estados numericos ---
     if (all(grepl("^[0-9]+$", estados_unicos))) {
       return(as.character(sort(as.numeric(estados_unicos))))
     }
     
-    # --- Caso 5: Estados con "Nivel 1", "Nivel 2", "Nivel 3" ---
     if (all(grepl("^Nivel [0-9]+$", estados_unicos))) {
       return(estados_unicos[order(as.numeric(gsub("Nivel ", "", estados_unicos)))])
     }
     
-    # --- Caso 6: Intentar detectar orden por frecuencia (fallback) ---
-    # Si no se puede determinar, usar orden alfabetico CON ADVERTENCIA
     warning("No se pudo determinar el orden logico de estados. Usando orden alfabetico.")
     return(sort(estados_unicos))
   }
@@ -672,7 +664,7 @@ server <- function(input, output, session) {
         alpha_grupo <- calcular_alpha(sub)
         
         # ============================================================
-        # [CORREGIDO] DETECTAR ORDEN LOGICO DE ESTADOS
+        # DETECTAR ORDEN LOGICO DE ESTADOS
         # ============================================================
         estados_unicos <- unique(sub[[input$markov_var]])
         estados_unicos <- estados_unicos[!is.na(estados_unicos) & estados_unicos != ""]
@@ -723,7 +715,6 @@ server <- function(input, output, session) {
           sim_base = markov_res$sim_base,
           dist_actual = markov_res$dist_actual,
           T_base = markov_res$T_base,
-          # --- GUARDAR ESTADOS EN ORDEN CORRECTO ---
           estados = colnames(markov_res$mat)
         )
       }
@@ -733,18 +724,28 @@ server <- function(input, output, session) {
         return()
       }
       
-      # Calcular sim_nudge para cada grupo
+      # ============================================================
+      # CALCULAR SIM_NUDGE PARA CADA GRUPO USANDO k
+      # ============================================================
       for (g in names(results_list)) {
         r <- results_list[[g]]
         if (!is.null(r$markov_mat) && !is.null(r$sim_base)) {
           P_n <- r$markov_mat
+          
           # Usar el k calculado por el modelo para este grupo
-k_nudge <- r$k  # r$k viene de index_res$k
-if (is.na(k_nudge) || k_nudge < 0 || k_nudge > 1) k_nudge <- 0.4
-
-for (i in 1:(nrow(P_n)-1)) {
-  av <- P_n[i, i] * k_nudge
-}
+          k_nudge <- r$k
+          if (is.na(k_nudge) || k_nudge < 0 || k_nudge > 1) k_nudge <- 0.4
+          
+          # Aplicar nudge a la matriz de transicion
+          for (i in 1:(nrow(P_n)-1)) {
+            av <- P_n[i, i] * k_nudge
+            P_n[i, i] <- P_n[i, i] - av
+            P_n[i, i+1] <- P_n[i, i+1] + av
+            # Normalizar la fila para que sume 1
+            P_n[i, ] <- P_n[i, ] / sum(P_n[i, ])
+          }
+          
+          # Simular con la matriz nudged
           sim_nudge <- r$sim_base
           for (j in 2:nrow(sim_nudge)) {
             sim_nudge[j, ] <- sim_nudge[j-1, ] %*% P_n
@@ -850,19 +851,17 @@ for (i in 1:(nrow(P_n)-1)) {
       }
     }
     
-    # --- Trayectorias de Markov ---
+    # --- Trayectorias de Markov (AQUI APARECEN LAS DOS LINEAS) ---
     p_markov <- function() {
       if (!is.null(r$sim_base) && nrow(r$sim_base) > 0) {
-        k_nudge <- if (!is.null(r$k)) r$k else 0.4
-        # Determinar etiqueta segun dominio
         y_label <- if (dominio == "educacion" || any(grepl("Participacion", colnames(r$sim_base)))) {
           "Probabilidad de participacion"
         } else {
           "Probabilidad de ocupacion"
         }
         return(graficar_trayectorias_markov(
-          r$sim_base, 
-          r$sim_nudge, 
+          sim_base = r$sim_base, 
+          sim_nudge = r$sim_nudge,  # <--- PASAMOS SIM_NUDGE
           estados = colnames(r$sim_base),
           titulo = paste("Trayectorias de Markov -", first_group),
           y_label = y_label
@@ -872,16 +871,15 @@ for (i in 1:(nrow(P_n)-1)) {
                annotate("text", x = 0.5, y = 0.5, label = "No hay datos para trayectorias"))
     }
     
-    # --- Arbol de Markov (CON NUEVA VERSION SIMPLE) ---
+    # --- Arbol de Markov ---
     p_arbol <- function() {
       if (!is.null(r$markov_mat)) {
-        # Obtener estados en el orden correcto
-        if (!is.null(r$estados) && length(r$estados) == ncol(r$markov_mat)) {
-          estados_arbol <- r$estados
+        estados_arbol <- if (!is.null(r$estados) && length(r$estados) == ncol(r$markov_mat)) {
+          r$estados
         } else if (!is.null(colnames(r$markov_mat))) {
-          estados_arbol <- colnames(r$markov_mat)
+          colnames(r$markov_mat)
         } else {
-          estados_arbol <- paste0("E", 1:ncol(r$markov_mat))
+          paste0("E", 1:ncol(r$markov_mat))
         }
         
         return(graficar_arbol_markov(
