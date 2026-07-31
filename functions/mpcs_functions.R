@@ -1297,20 +1297,7 @@ resumen_sensibilidad <- function(resultado_sens, idioma = "es") {
 # ============================================================================
 # 16. seleccionar_umbral_bootstrap — Selección de umbral por estabilidad
 # ============================================================================
-# ============================================================================
-# 16. seleccionar_umbral_bootstrap — Selección de umbral por estabilidad
-# ============================================================================
 
-#' Seleccionar umbral de correlación por bootstrap stability (Jaccard similarity)
-#'
-#' @param datos data.frame con los datos
-#' @param variables vector con nombres de columnas a incluir en el grafo
-#' @param umbrales vector con umbrales a evaluar (defecto: c(0.05, 0.07, 0.10, 0.12, 0.15, 0.20))
-#' @param n_boot número de remuestreos bootstrap (defecto: 20)
-#' @param seed semilla para reproducibilidad (defecto: 123)
-#' @param criterio_jaccard umbral mínimo de Jaccard para considerar estable (defecto: 0.70)
-#' @return lista con umbral óptimo, estabilidad por umbral, y nodos óptimos
-#' @export
 seleccionar_umbral_bootstrap <- function(datos, variables, 
                                          umbrales = c(0.05, 0.07, 0.10, 0.12, 0.15, 0.20),
                                          n_boot = 20,
@@ -1323,18 +1310,23 @@ seleccionar_umbral_bootstrap <- function(datos, variables,
   
   set.seed(seed)
   n <- nrow(datos)
-  n_umbrales <- length(umbrales)
   
   resultados <- data.frame()
   
-  # --- Bucle por cada umbral ---
-  for (idx_u in seq_along(umbrales)) {
-    umbral <- umbrales[idx_u]
+  for (umbral in umbrales) {
     
     # --- 1. Grafo con datos originales ---
-    res_original <- calcular_grafo(datos, variables, umbral = umbral)
-    nodo_original <- res_original$optimal_node
-    if (is.na(nodo_original) || is.null(nodo_original)) nodo_original <- "Sin_nodo"
+    res_original <- tryCatch({
+      calcular_grafo(datos, variables, umbral = umbral)
+    }, error = function(e) {
+      list(optimal_node = NA, graph = NULL)
+    })
+    
+    nodo_original <- if (!is.null(res_original$optimal_node) && !is.na(res_original$optimal_node)) {
+      res_original$optimal_node
+    } else {
+      "Sin_nodo"
+    }
     
     # --- 2. Bootstrap ---
     nodos_boot <- character()
@@ -1346,14 +1338,26 @@ seleccionar_umbral_bootstrap <- function(datos, variables,
       datos_boot <- datos[idx_boot, , drop = FALSE]
       
       # Construir grafo con el umbral actual
-      res_boot <- calcular_grafo(datos_boot, variables, umbral = umbral)
-      nodo_boot <- res_boot$optimal_node
-      if (is.na(nodo_boot) || is.null(nodo_boot)) nodo_boot <- "Sin_nodo"
+      res_boot <- tryCatch({
+        calcular_grafo(datos_boot, variables, umbral = umbral)
+      }, error = function(e) {
+        list(optimal_node = NA, graph = NULL)
+      })
+      
+      nodo_boot <- if (!is.null(res_boot$optimal_node) && !is.na(res_boot$optimal_node)) {
+        res_boot$optimal_node
+      } else {
+        "Sin_nodo"
+      }
       nodos_boot <- c(nodos_boot, nodo_boot)
       
       # Guardar aristas si hay grafo
-      if (!is.null(res_boot$graph)) {
-        aristas_boot[[b]] <- igraph::as_edgelist(res_boot$graph)
+      if (!is.null(res_boot$graph) && igraph::vcount(res_boot$graph) > 0) {
+        aristas_boot[[b]] <- tryCatch({
+          igraph::as_edgelist(res_boot$graph)
+        }, error = function(e) {
+          matrix(0, nrow = 0, ncol = 2)
+        })
       } else {
         aristas_boot[[b]] <- matrix(0, nrow = 0, ncol = 2)
       }
@@ -1376,13 +1380,13 @@ seleccionar_umbral_bootstrap <- function(datos, variables,
           
           interseccion <- length(intersect(set_b, set_c))
           union <- length(union(set_b, set_c))
-          jaccard <- interseccion / union
+          jaccard <- if (union > 0) interseccion / union else 0
         }
         jaccards <- c(jaccards, jaccard)
       }
     }
     
-    jaccard_promedio <- mean(jaccards, na.rm = TRUE)
+    jaccard_promedio <- if (length(jaccards) > 0) mean(jaccards, na.rm = TRUE) else 0
     
     # --- 4. Estabilidad del nodo óptimo ---
     freq_nodos <- table(nodos_boot)
@@ -1401,7 +1405,19 @@ seleccionar_umbral_bootstrap <- function(datos, variables,
   }
   
   # --- 6. Seleccionar umbral óptimo ---
-  resultados_filtrados <- resultados[resultados$Cumple_Criterio, ]
+  if (nrow(resultados) == 0) {
+    return(list(
+      umbral_optimo = 0.10,
+      resultados = data.frame(),
+      criterio_jaccard = criterio_jaccard,
+      n_boot = n_boot,
+      nodo_original = "No disponible",
+      nodo_mas_frecuente = "No disponible",
+      pct_nodo_mas_frecuente = 0
+    ))
+  }
+  
+  resultados_filtrados <- resultados[resultados$Cumple_Criterio & !is.na(resultados$Cumple_Criterio), ]
   
   if (nrow(resultados_filtrados) > 0) {
     idx_optimo <- which.max(resultados_filtrados$Jaccard_Promedio + resultados_filtrados$Pct_Nodo_Estable / 100)
@@ -1409,16 +1425,19 @@ seleccionar_umbral_bootstrap <- function(datos, variables,
   } else {
     idx_optimo <- which.max(resultados$Jaccard_Promedio)
     umbral_optimo <- resultados$Umbral[idx_optimo]
-    warning("Ningún umbral cumple con el criterio de estabilidad. Seleccionado el de mayor Jaccard.")
   }
+  
+  # --- Extraer nodo original y mas frecuente para el umbral óptimo ---
+  fila_optima <- resultados[resultados$Umbral == umbral_optimo, ]
   
   return(list(
     umbral_optimo = umbral_optimo,
     resultados = resultados,
     criterio_jaccard = criterio_jaccard,
     n_boot = n_boot,
-    nodo_original = resultados$Nodo_Original[which(resultados$Umbral == umbral_optimo)[1]],
-    nodo_mas_frecuente = resultados$Nodo_Mas_Frecuente[which(resultados$Umbral == umbral_optimo)[1]]
+    nodo_original = if (nrow(fila_optima) > 0) fila_optima$Nodo_Original[1] else "No disponible",
+    nodo_mas_frecuente = if (nrow(fila_optima) > 0) fila_optima$Nodo_Mas_Frecuente[1] else "No disponible",
+    pct_nodo_mas_frecuente = if (nrow(fila_optima) > 0) fila_optima$Pct_Nodo_Estable[1] else 0
   ))
 }
 
