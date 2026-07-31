@@ -507,10 +507,10 @@ generar_datos_aula <- function(n = 200, seed = 456) {
 }
 
 # ============================================================================
-# 8. graficar_arbol_markov — Arbol de transicion de Markov (VERSION MEJORADA)
+# graficar_arbol_markov — Arbol de transicion de Markov (VERSION SIMPLE Y CLARA)
 # ============================================================================
 
-#' Graficar arbol de transicion de Markov (Version ultra clara y comprensible)
+#' Graficar arbol de transicion de Markov (Version simple y clara)
 #'
 #' @param P matriz de transicion (m x m)
 #' @param estados vector con nombres de estados
@@ -519,14 +519,11 @@ generar_datos_aula <- function(n = 200, seed = 456) {
 #' @return objeto ggplot
 #' @export
 graficar_arbol_markov <- function(P, estados = NULL, umbral_prob = 0.05, 
-                                  titulo = "Arbol de Transicion de Markov") {
+                                  titulo = "Transiciones de Markov") {
   
   # --- Verificar paquetes ---
   if (!requireNamespace("ggplot2", quietly = TRUE)) {
     stop("Se requiere el paquete ggplot2")
-  }
-  if (!requireNamespace("igraph", quietly = TRUE)) {
-    stop("Se requiere el paquete igraph")
   }
   
   # --- Validar entrada ---
@@ -545,194 +542,127 @@ graficar_arbol_markov <- function(P, estados = NULL, umbral_prob = 0.05,
   } else if (!is.null(colnames(P)) && all(colnames(P) != "")) {
     estados_nombres <- colnames(P)
   } else {
-    estados_nombres <- paste0("Estado ", 1:m)
+    estados_nombres <- paste0("E", 1:m)
   }
   
-  # --- Limpiar nombres para mostrar (mas cortos) ---
-  estados_mostrar <- estados_nombres
-  for (i in 1:length(estados_mostrar)) {
-    if (nchar(estados_mostrar[i]) > 16) {
-      estados_mostrar[i] <- substr(estados_mostrar[i], 1, 14)
-    }
-  }
+  # --- Crear datos para el grafico ---
   
-  # --- Crear aristas con transiciones relevantes ---
-  aristas <- data.frame()
+  # 1. Estados (nodos) - posicion horizontal
+  nodos <- data.frame(
+    id = 1:m,
+    nombre = estados_nombres,
+    x = 1:m,
+    y = 0
+  )
+  
+  # 2. Transiciones (flechas) - solo las mas importantes
+  transiciones <- data.frame()
   for (i in 1:m) {
     for (j in 1:m) {
       if (P[i, j] >= umbral_prob && i != j) {
-        tipo <- if (j > i) "Avance" else "Retroceso"
-        flecha <- if (j > i) "\u2192" else "\u2190"
-        aristas <- rbind(aristas, data.frame(
-          from = estados_mostrar[i],
-          to = estados_mostrar[j],
+        # Calcular posicion de la flecha (ligeramente arriba o abajo)
+        offset_y <- 0
+        if (j > i) {
+          # Avance: flecha hacia la derecha (ligeramente arriba)
+          offset_y <- 0.15
+        } else {
+          # Retroceso: flecha hacia la izquierda (ligeramente abajo)
+          offset_y <- -0.15
+        }
+        
+        transiciones <- rbind(transiciones, data.frame(
+          from = i,
+          to = j,
+          from_x = i,
+          to_x = j,
+          from_y = offset_y,
+          to_y = offset_y,
           prob = round(P[i, j] * 100, 1),
-          prob_raw = P[i, j],
-          from_idx = i,
-          to_idx = j,
-          tipo = tipo,
-          flecha = flecha,
-          etiqueta = paste0(round(P[i, j] * 100, 1), "% ", flecha)
+          tipo = if (j > i) "Avance" else "Retroceso",
+          color = if (j > i) "#2E86AB" else "#E84855"
         ))
       }
     }
   }
   
-  if (nrow(aristas) == 0) {
+  if (nrow(transiciones) == 0) {
     return(ggplot2::ggplot() + ggplot2::theme_void() + 
              ggplot2::annotate("text", x = 0.5, y = 0.5, 
                               label = paste0("No hay transiciones >= ", round(umbral_prob*100, 1), "%"),
                               size = 6, color = "#7F8C8D", fontface = "bold"))
   }
   
-  # --- Crear grafo para layout ---
-  g <- igraph::graph_from_data_frame(aristas[, c("from", "to")], directed = TRUE)
-  
-  # --- Layout en arbol vertical (de arriba hacia abajo) ---
-  tryCatch({
-    layout <- igraph::layout_as_tree(g, root = 1, circular = FALSE)
-    # Invertir Y para que vaya de arriba hacia abajo
-    layout[, 2] <- -layout[, 2]
-  }, error = function(e) {
-    layout <- igraph::layout_with_fr(g, niter = 2000)
-  })
-  
-  # --- Escalar layout para mejor visualizacion ---
-  if (nrow(layout) > 0) {
-    layout[, 1] <- scale(layout[, 1]) * 3.5
-    layout[, 2] <- scale(layout[, 2]) * 3.5
-  }
-  
-  coords <- data.frame(
-    x = layout[, 1],
-    y = layout[, 2],
-    name = igraph::V(g)$name
-  )
-  
-  # --- Crear edge_data con curvatura ---
-  edge_data <- data.frame()
-  for (i in 1:nrow(aristas)) {
-    from_idx <- which(coords$name == aristas$from[i])
-    to_idx <- which(coords$name == aristas$to[i])
-    if (length(from_idx) > 0 && length(to_idx) > 0) {
-      # Curvatura para evitar superposicion
-      curvature <- 0.2
-      if (aristas$tipo[i] == "Retroceso") curvature <- -0.25
-      
-      edge_data <- rbind(edge_data, data.frame(
-        x = coords$x[from_idx],
-        y = coords$y[from_idx],
-        xend = coords$x[to_idx],
-        yend = coords$y[to_idx],
-        prob = aristas$prob[i],
-        prob_raw = aristas$prob_raw[i],
-        from = aristas$from[i],
-        to = aristas$to[i],
-        tipo = aristas$tipo[i],
-        flecha = aristas$flecha[i],
-        etiqueta = aristas$etiqueta[i],
-        curvature = curvature
-      ))
-    }
-  }
-  
-  if (nrow(edge_data) == 0) {
-    return(ggplot2::ggplot() + ggplot2::theme_void() + 
-             ggplot2::annotate("text", x = 0.5, y = 0.5, 
-                              label = "Error al generar el arbol",
-                              size = 6, color = "#7F8C8D", fontface = "bold"))
-  }
-  
-  # --- Colores ---
-  colores_tipo <- c("Avance" = "#2E86AB", "Retroceso" = "#E84855")
-  colores_fondo <- c("Avance" = "#D6EAF8", "Retroceso" = "#FADBD8")
-  
-  # --- Tamaño de nodos ---
-  node_degrees <- table(c(as.character(aristas$from), as.character(aristas$to)))
-  node_size <- ifelse(coords$name %in% names(node_degrees), 
-                      24 + node_degrees[coords$name] * 2, 
-                      22)
-  node_size <- pmin(40, pmax(20, node_size))
-  
   # --- Crear grafico ---
   p <- ggplot2::ggplot() +
     
-    # --- Flechas de transicion ---
-    ggplot2::geom_curve(
-      data = edge_data,
-      aes(x = x, y = y, xend = xend, yend = yend,
-          color = tipo, linewidth = prob_raw),
-      curvature = 0.2,
-      arrow = arrow(length = unit(0.3, "cm"), type = "closed"),
+    # --- Lineas de transicion (flechas) ---
+    ggplot2::geom_segment(
+      data = transiciones,
+      aes(x = from_x, xend = to_x, 
+          y = from_y, yend = to_y,
+          color = tipo,
+          linewidth = prob),
+      arrow = arrow(length = unit(0.25, "cm"), type = "closed"),
       alpha = 0.8
     ) +
     
-    # --- Escala de grosor de flechas ---
+    # --- Grosor de lineas proporcional a probabilidad ---
     ggplot2::scale_linewidth_continuous(
       range = c(0.5, 2.5),
       guide = "none"
     ) +
     
-    # --- Colores de flechas ---
+    # --- Colores ---
     ggplot2::scale_color_manual(
-      values = colores_tipo,
-      name = "Tipo de transicion",
-      labels = c("Avance" = "Avance (hacia adelante)", 
-                 "Retroceso" = "Retroceso (hacia atras)")
+      values = c("Avance" = "#2E86AB", "Retroceso" = "#E84855"),
+      name = "Tipo",
+      labels = c("Avance" = "Avance \u2192", "Retroceso" = "Retroceso \u2190")
     ) +
     
-    # --- ETIQUETAS DE PORCENTAJE (EN CAJAS CLARAS) ---
-    # Se colocan en el punto medio de cada flecha
+    # --- Etiquetas de probabilidad (con fondo blanco) ---
     ggplot2::geom_label(
-      data = edge_data,
-      aes(x = (x + xend)/2, 
-          y = (y + yend)/2 + 0.12, 
-          label = etiqueta,
-          fill = tipo),
-      size = 4,
+      data = transiciones,
+      aes(x = (from_x + to_x) / 2, 
+          y = (from_y + to_y) / 2 + 0.12,
+          label = paste0(prob, "%")),
+      size = 4.5,
       fontface = "bold",
-      color = "white",
-      label.size = 0.4,
-      label.padding = unit(0.25, "lines"),
-      alpha = 0.9,
+      fill = "white",
+      color = "#1A3A5C",
+      label.size = 0.3,
+      label.padding = unit(0.2, "lines"),
+      alpha = 0.95,
       show.legend = FALSE
     ) +
     
-    # --- Colores de fondo de las etiquetas ---
-    ggplot2::scale_fill_manual(values = colores_tipo) +
-    
-    # --- NODOS (ESTADOS) ---
+    # --- Nodos (estados) ---
     ggplot2::geom_point(
-      data = coords,
+      data = nodos,
       aes(x = x, y = y),
-      size = node_size,
+      size = 22,
       color = "#2C3E50",
       fill = "#F8F9F9",
       shape = 21,
-      stroke = 2.5
+      stroke = 2
     ) +
     
-    # --- Borde de nodos segun tipo (opcional: resaltar nodos con muchas conexiones) ---
-    # --- ETIQUETAS DE NODOS ---
+    # --- Etiquetas de nodos ---
     ggplot2::geom_text(
-      data = coords,
-      aes(x = x, y = y, label = name),
-      size = 4.5,
+      data = nodos,
+      aes(x = x, y = y, label = nombre),
+      size = 4,
       fontface = "bold",
       color = "#1A3A5C"
     ) +
     
-    # --- Ajustar limites ---
-    ggplot2::xlim(min(coords$x) - 0.8, max(coords$x) + 0.8) +
-    ggplot2::ylim(min(coords$y) - 0.8, max(coords$y) + 0.8) +
+    # --- Ajustes de ejes ---
+    ggplot2::xlim(0.5, m + 0.5) +
+    ggplot2::ylim(-0.6, 0.6) +
     
     # --- TITULOS ---
     ggplot2::labs(
       title = titulo,
-      subtitle = paste0(
-        "Transiciones con probabilidad >= ", round(umbral_prob * 100, 1), "% | ",
-        "Azul = Avance (→) | Rojo = Retroceso (←)"
-      ),
+      subtitle = paste0("Solo transiciones con probabilidad >= ", round(umbral_prob * 100, 1), "%"),
       x = "", y = "",
       color = ""
     ) +
@@ -743,14 +673,13 @@ graficar_arbol_markov <- function(P, estados = NULL, umbral_prob = 0.05,
       axis.text = element_blank(),
       axis.ticks = element_blank(),
       panel.grid = element_blank(),
-      plot.title = element_text(face = "bold", size = 17, hjust = 0.5, color = "#1A3A5C"),
-      plot.subtitle = element_text(size = 12, hjust = 0.5, color = "#5D6D7E"),
-      plot.margin = margin(25, 35, 25, 35),
+      plot.title = element_text(face = "bold", size = 16, hjust = 0.5, color = "#1A3A5C"),
+      plot.subtitle = element_text(size = 11, hjust = 0.5, color = "#5D6D7E"),
+      plot.margin = margin(20, 30, 20, 30),
       legend.position = "bottom",
       legend.box = "horizontal",
       legend.title = element_text(face = "bold", size = 11),
-      legend.text = element_text(size = 10),
-      legend.key.size = unit(0.8, "cm")
+      legend.text = element_text(size = 10)
     )
   
   return(p)
