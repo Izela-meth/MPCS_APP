@@ -707,7 +707,7 @@ server <- function(input, output, session) {
     showNotification("Bootstrap completed successfully!", type = "message")
   })
   
- # ==========================================================================
+# ==========================================================================
 # [CORREGIDO] SALIDA DE BOOTSTRAP - MANEJO DE ERRORES
 # ==========================================================================
 output$bootstrap_results_ui <- renderUI({
