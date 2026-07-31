@@ -854,6 +854,7 @@ for (i in 1:(nrow(P_n)-1)) {
     # --- Trayectorias de Markov ---
     p_markov <- function() {
       if (!is.null(r$sim_base) && nrow(r$sim_base) > 0) {
+        k_nudge <- if (!is.null(r$k)) r$k else 0.4
         # Determinar etiqueta segun dominio
         y_label <- if (dominio == "educacion" || any(grepl("Participacion", colnames(r$sim_base)))) {
           "Probabilidad de participacion"
