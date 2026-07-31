@@ -45,21 +45,21 @@ ui <- page_navbar(
   # Pestaña 1: Carga de Datos
   # ============================================================================
   nav_panel(
-    "1. Carga de Datos",
+    "1. Data Upload",
     fluidRow(
       column(
         width = 4,
         wellPanel(
-          h4("Cargar archivo"),
-          fileInput("file", "Selecciona un archivo",
+          h4("Upload file"),
+          fileInput("file", "Select a file",
                     accept = c(".csv", ".xlsx", ".xls", ".dta"),
-                    buttonLabel = "Examinar",
-                    placeholder = "Ningun archivo seleccionado"),
-          tags$small("Formatos soportados: CSV, Excel (.xlsx, .xls), Stata (.dta)"),
+                    buttonLabel = "Browse",
+                    placeholder = "No file selected"),
+          tags$small("Supported formats: CSV, Excel (.xlsx, .xls), Stata (.dta)"),
           hr(),
-          h4("O usar datos de demostracion"),
-          p("Carga datos simulados de salud (ENDES) para probar la aplicacion."),
-          actionButton("load_demo", "Cargar Datos ENDES (Salud)", 
+          h4("Or use demo data"),
+          p("Load simulated health data (ENDES) to test the application."),
+          actionButton("load_demo", "Load ENDES Data (Health)", 
                        class = "btn-primary w-100",
                        icon = icon("heart"))
         )
@@ -67,10 +67,10 @@ ui <- page_navbar(
       column(
         width = 8,
         wellPanel(
-          h5("Vista previa (primeras 10 filas)"),
+          h5("Preview (first 10 rows)"),
           DTOutput("data_preview"),
           hr(),
-          h5("Estadisticas basicas"),
+          h5("Basic statistics"),
           verbatimTextOutput("data_stats")
         )
       )
@@ -81,56 +81,94 @@ ui <- page_navbar(
   # Pestaña 2: Configuracion
   # ============================================================================
   nav_panel(
-    "2. Configuracion",
+    "2. Configuration",
     fluidRow(
       column(
         width = 6,
         wellPanel(
-          h4("Variables del grafo"),
-          helpText("Selecciona minimo 5 variables numericas para construir el grafo conductual."),
+          h4("Graph variables"),
+          helpText("Select at least 5 numeric variables to build the behavioral graph."),
           uiOutput("graph_vars_ui"),
           hr(),
-          h4("Variable de agrupacion (opcional)"),
-          helpText("Si seleccionas una variable, el analisis se realizara por separado para cada grupo."),
+          h4("Grouping variable (optional)"),
+          helpText("If selected, the analysis will be performed separately for each group."),
           uiOutput("group_var_ui")
         )
       ),
       column(
         width = 6,
         wellPanel(
-          h4("Configuracion de Markov"),
-          helpText("Selecciona la columna que contiene los estados conductuales."),
+          h4("Markov configuration"),
+          helpText("Select the column containing the behavioral states."),
           uiOutput("markov_var_ui"),
           hr(),
-          h4("Parametros ajustables"),
-          sliderInput("threshold", "Umbral de correlacion",
+          h4("Adjustable parameters"),
+          sliderInput("threshold", "Correlation threshold",
                       min = 0.05, max = 0.30, value = 0.10, step = 0.01,
-                      post = tags$span("  (|r| > valor)")),
+                      post = tags$span("  (|r| > value)")),
+          
+          # ============================================================
+          # [NUEVO] Campo para tasas de avance de Markov
+          # ============================================================
           hr(),
-          h5("Ponderadores del Indice MPCS"),
+          h4("Markov transition rates (optional)"),
+          helpText("Enter the forward transition probabilities between consecutive states."),
+          helpText("Example for 5 states: 0.48, 0.89, 0.62 (diagnosis → purchase → correct intake → control)"),
+          textInput("tasas_avance_input", "Forward transition rates (comma separated):",
+                    placeholder = "e.g., 0.48, 0.89, 0.62"),
+          helpText("If left empty, the generic heuristic matrix will be used."),
+          
+          # ============================================================
+          # [NUEVO] Modulo de Bootstrap para selección de umbral
+          # ============================================================
+          hr(),
+          h4("Bootstrap threshold selection"),
+          helpText("Evaluates the stability of the optimal node across different correlation thresholds."),
           fluidRow(
-            column(4, numericInput("w1", "Grafo (w1)", 
+            column(6,
+              numericInput("boot_n_sim", "Number of bootstrap replicates:",
+                           value = 100, min = 50, max = 500, step = 10)
+            ),
+            column(6,
+              actionButton("run_bootstrap", "Run Bootstrap",
+                           class = "btn-info w-100",
+                           icon = icon("random"))
+            )
+          ),
+          conditionalPanel(
+            condition = "input.run_bootstrap > 0",
+            div(style = "padding: 10px; background-color: #f8f9fa; border-radius: 5px; margin-top: 10px;",
+                h5("Bootstrap Results"),
+                verbatimTextOutput("bootstrap_results"),
+                plotOutput("bootstrap_plot", height = "200px")
+            )
+          ),
+          
+          hr(),
+          h5("MPCS Index Weights"),
+          fluidRow(
+            column(4, numericInput("w1", "Graph (w1)", 
                                    value = 0.35, min = 0, max = 1, step = 0.05)),
             column(4, numericInput("w2", "Markov (w2)", 
                                    value = 0.40, min = 0, max = 1, step = 0.05)),
-            column(4, numericInput("w3", "Juegos (w3)", 
+            column(4, numericInput("w3", "Games (w3)", 
                                    value = 0.25, min = 0, max = 1, step = 0.05))
           ),
-          tags$small("Los ponderadores deben sumar 1. Actual: ", 
+          tags$small("Weights must sum to 1. Current: ", 
                      textOutput("suma_ponderadores", inline = TRUE)),
           hr(),
-          sliderInput("R_factor", "Factor de recursos (R)",
+          sliderInput("R_factor", "Resource factor (R)",
                       min = 0, max = 1, value = 0.65, step = 0.05,
-                      post = tags$span("  (mayor = mas recursos disponibles)")),
+                      post = tags$span("  (higher = more resources available)")),
           hr(),
-          h4("Indicador contextual (alpha)"),
-          helpText("alpha representa la favorabilidad del contexto para la adopcion de la conducta."),
+          h4("Contextual indicator (alpha)"),
+          helpText("alpha represents the favorability of the context for behavior adoption."),
           fluidRow(
             column(6,
-              radioButtons("alpha_mode", "Metodo para alpha:",
-                           choices = c("Seleccionar variables" = "vars",
-                                      "Ingresar valor manual" = "manual",
-                                      "Automatico" = "auto"),
+              radioButtons("alpha_mode", "Method for alpha:",
+                           choices = c("Select variables" = "vars",
+                                      "Enter manual value" = "manual",
+                                      "Automatic" = "auto"),
                            selected = "auto")
             ),
             column(6,
@@ -140,12 +178,12 @@ ui <- page_navbar(
               ),
               conditionalPanel(
                 condition = "input.alpha_mode == 'manual'",
-                numericInput("alpha_manual", "Valor de alpha (0-1):",
+                numericInput("alpha_manual", "Alpha value (0-1):",
                              value = 0.60, min = 0, max = 1, step = 0.01)
               ),
               conditionalPanel(
                 condition = "input.alpha_mode == 'auto'",
-                helpText("La app usara el promedio de variables relacionadas con acceso/recurso.")
+                helpText("The app will use the average of access/resource related variables.")
               )
             )
           ),
@@ -154,12 +192,12 @@ ui <- page_navbar(
             style = "font-size: 0.85em;",
             icon("circle-info"),
             HTML(
-              "<b>Nota metodologica.</b><br><br>
-              <b>I_Markov:</b> Se calcula como la probabilidad acumulada en los estados 
-              avanzados en un horizonte fijo de 10 periodos.<br><br>
-              <b>alpha (contexto):</b> Si seleccionas variables, se normalizan a 0-1 y se promedian. 
-              Si ingresas manual, usa ese valor. En modo automatico, busca variables comunes 
-              como 'Acceso_salud' o usa la primera variable numerica."
+              "<b>Methodological note.</b><br><br>
+              <b>I_Markov:</b> Calculated as the accumulated probability in advanced states 
+              at a fixed horizon of 10 periods.<br><br>
+              <b>alpha (context):</b> If you select variables, they are normalized to 0-1 and averaged. 
+              If you enter manually, that value is used. In automatic mode, it looks for common 
+              variables like 'Acceso_salud' or uses the first numeric variable."
             )
           )
         )
@@ -169,7 +207,7 @@ ui <- page_navbar(
       column(
         width = 12,
         wellPanel(
-          actionButton("run_mpcs", "Ejecutar MPCS", 
+          actionButton("run_mpcs", "Run MPCS", 
                        class = "btn-success btn-lg w-100",
                        icon = icon("play")),
           uiOutput("validation_msg")
@@ -182,12 +220,12 @@ ui <- page_navbar(
   # Pestaña 3: Resultados
   # ============================================================================
   nav_panel(
-    "3. Resultados",
+    "3. Results",
     fluidRow(
       column(
         width = 12,
         wellPanel(
-          h4("Tabla de resultados"),
+          h4("Results table"),
           DTOutput("results_table")
         )
       )
@@ -196,14 +234,14 @@ ui <- page_navbar(
       column(
         width = 6,
         wellPanel(
-          h5("Grafo conductual"),
+          h5("Behavioral graph"),
           plotOutput("plot_graph", height = "500px")
         )
       ),
       column(
         width = 6,
         wellPanel(
-          h5("Distribucion de estados por grupo"),
+          h5("State distribution by group"),
           plotOutput("plot_states", height = "500px")
         )
       )
@@ -212,14 +250,14 @@ ui <- page_navbar(
       column(
         width = 6,
         wellPanel(
-          h5("Transiciones de Markov"),
+          h5("Markov transitions"),
           plotOutput("plot_arbol_markov", height = "450px")
         )
       ),
       column(
         width = 6,
         wellPanel(
-          h5("Dinamica de Teoria de Juegos"),
+          h5("Game theory dynamics"),
           plotOutput("plot_juego_evolutivo", height = "450px")
         )
       )
@@ -228,14 +266,14 @@ ui <- page_navbar(
       column(
         width = 6,
         wellPanel(
-          h5("Trayectorias de Markov"),
+          h5("Markov trajectories"),
           plotOutput("plot_markov", height = "400px")
         )
       ),
       column(
         width = 6,
         wellPanel(
-          h5("Ranking de I_MPCS"),
+          h5("I_MPCS ranking"),
           plotOutput("plot_ranking", height = "400px")
         )
       )
@@ -247,21 +285,21 @@ ui <- page_navbar(
       column(
         width = 12,
         wellPanel(
-          h4("Analisis de Sensibilidad"),
-          p("Evalua la robustez de la recomendacion ante cambios en los pesos w1, w2, w3."),
+          h4("Sensitivity Analysis"),
+          p("Evaluates the robustness of the recommendation to changes in weights w1, w2, w3."),
           hr(),
           fluidRow(
             column(
               width = 3,
               numericInput("sens_n_sim", 
-                           "Numero de simulaciones:", 
+                           "Number of simulations:", 
                            value = 10000, 
                            min = 100, 
                            max = 50000,
                            step = 100),
               br(),
               actionButton("run_sensitivity", 
-                           "Ejecutar analisis",
+                           "Run analysis",
                            icon = icon("chart-line"),
                            class = "btn-primary",
                            style = "width: 100%;")
@@ -271,7 +309,7 @@ ui <- page_navbar(
               conditionalPanel(
                 condition = "input.run_sensitivity > 0",
                 div(style = "padding: 10px; background-color: #f8f9fa; border-radius: 5px;",
-                    h5("Distribucion del Indice MPCS"),
+                    h5("MPCS Index Distribution"),
                     plotOutput("sens_plot", height = "300px"),
                     verbatimTextOutput("sens_summary")
                 )
@@ -288,7 +326,7 @@ ui <- page_navbar(
       column(
         width = 12,
         wellPanel(
-          h4("Interpretacion automatica"),
+          h4("Automatic interpretation"),
           uiOutput("interpretation_text")
         )
       )
@@ -299,14 +337,14 @@ ui <- page_navbar(
   # Pestaña 4: Reporte y Descarga
   # ============================================================================
   nav_panel(
-    "4. Reporte y Descarga",
+    "4. Report & Download",
     fluidRow(
       column(
         width = 6,
         wellPanel(
-          h4("Descargar datos"),
-          p("Descarga la tabla de resultados en formato CSV."),
-          downloadButton("download_csv", "Descargar tabla CSV", 
+          h4("Download data"),
+          p("Download the results table as CSV."),
+          downloadButton("download_csv", "Download CSV", 
                          class = "btn-primary w-100",
                          icon = icon("file-csv"))
         )
@@ -314,9 +352,9 @@ ui <- page_navbar(
       column(
         width = 6,
         wellPanel(
-          h4("Generar reporte"),
-          p("Descarga un reporte completo en formato HTML."),
-          downloadButton("download_report", "Descargar reporte HTML", 
+          h4("Generate report"),
+          p("Download a complete report in HTML format."),
+          downloadButton("download_report", "Download HTML Report", 
                          class = "btn-danger w-100",
                          icon = icon("file-code"))
         )
@@ -337,6 +375,7 @@ server <- function(input, output, session) {
     results_df = NULL,
     plots = NULL,
     sens_resultado = NULL,
+    bootstrap_resultado = NULL,
     dominio = "salud"
   )
   
@@ -360,19 +399,19 @@ server <- function(input, output, session) {
     })
     
     if (is.null(datos)) {
-      showNotification("Formato no soportado.", type = "error")
+      showNotification("Unsupported format.", type = "error")
       return()
     }
     
     rv$data <- datos
     rv$dominio <- "salud"
-    showNotification(paste("Datos cargados:", nrow(datos), "filas,", ncol(datos), "columnas"), type = "message")
+    showNotification(paste("Data loaded:", nrow(datos), "rows,", ncol(datos), "columns"), type = "message")
     
     vars <- names(datos)
     vars_num <- names(datos)[sapply(datos, is.numeric)]
     updateSelectInput(session, "graph_vars", choices = vars_num, selected = vars_num[1:min(5, length(vars_num))])
     updateSelectInput(session, "markov_var", choices = vars, selected = if ("Estado_Markov" %in% vars) "Estado_Markov" else vars[length(vars)])
-    updateSelectInput(session, "group_var", choices = c("Ninguno (Global)", vars), selected = if ("Region" %in% vars) "Region" else "Ninguno (Global)")
+    updateSelectInput(session, "group_var", choices = c("None (Global)", vars), selected = if ("Region" %in% vars) "Region" else "None (Global)")
     updateSelectInput(session, "alpha_vars", choices = vars_num, selected = vars_num[1:min(2, length(vars_num))])
   })
   
@@ -380,26 +419,26 @@ server <- function(input, output, session) {
   # CARGA DE DATOS DE DEMOSTRACION (ENDES - Salud)
   # ==========================================================================
   observeEvent(input$load_demo, {
-    showNotification("Cargando datos de demostracion (ENDES - Salud)...", type = "message")
+    showNotification("Loading demo data (ENDES - Health)...", type = "message")
     
     generar_y_cargar_demo <- function() {
       datos_demo <- generar_demo_data(1000, 123)
       rv$data <- datos_demo
       rv$dominio <- "salud"
-      showNotification("Datos de demostracion generados exitosamente (n=1000).", type = "message")
+      showNotification("Demo data generated successfully (n=1000).", type = "message")
     }
     
     if (file.exists("data/demo_data.csv")) {
       tryCatch({
         rv$data <- read.csv("data/demo_data.csv")
         rv$dominio <- "salud"
-        showNotification("Datos de demostracion cargados desde archivo.", type = "message")
+        showNotification("Demo data loaded from file.", type = "message")
       }, error = function(e) {
-        showNotification(paste("Error al leer archivo:", e$message), type = "error")
+        showNotification(paste("Error reading file:", e$message), type = "error")
         generar_y_cargar_demo()
       })
     } else {
-      showNotification("No se encontro archivo. Generando datos de demostracion...", type = "message")
+      showNotification("File not found. Generating demo data...", type = "message")
       generar_y_cargar_demo()
     }
     
@@ -407,7 +446,7 @@ server <- function(input, output, session) {
     vars_num <- names(rv$data)[sapply(rv$data, is.numeric)]
     updateSelectInput(session, "graph_vars", choices = vars_num, selected = vars_num[1:min(5, length(vars_num))])
     updateSelectInput(session, "markov_var", choices = vars, selected = "Estado_Markov")
-    updateSelectInput(session, "group_var", choices = c("Ninguno (Global)", vars), selected = "Region")
+    updateSelectInput(session, "group_var", choices = c("None (Global)", vars), selected = "Region")
     updateSelectInput(session, "alpha_vars", choices = vars_num, selected = c("Acceso_salud", "Tiene_seguro"))
   })
   
@@ -433,13 +472,13 @@ server <- function(input, output, session) {
   
   output$data_stats <- renderPrint({
     req(rv$data)
-    cat("=== ESTADISTICAS DE LOS DATOS ===\n\n")
-    cat("Observaciones (n):", nrow(rv$data), "\n")
+    cat("=== DATA STATISTICS ===\n\n")
+    cat("Observations (n):", nrow(rv$data), "\n")
     cat("Variables:", ncol(rv$data), "\n")
-    cat("Valores faltantes:", sum(is.na(rv$data)), "\n\n")
-    cat("--- Tipos de variables ---\n")
+    cat("Missing values:", sum(is.na(rv$data)), "\n\n")
+    cat("--- Variable types ---\n")
     print(table(sapply(rv$data, class)))
-    cat("\n--- Primeras variables ---\n")
+    cat("\n--- First variables ---\n")
     print(names(rv$data)[1:min(10, ncol(rv$data))])
   })
   
@@ -450,9 +489,9 @@ server <- function(input, output, session) {
     req(rv$data)
     vars_num <- names(rv$data)[sapply(rv$data, is.numeric)]
     if (length(vars_num) == 0) {
-      return(div(class = "alert alert-warning", "No se encontraron variables numericas."))
+      return(div(class = "alert alert-warning", "No numeric variables found."))
     }
-    checkboxGroupInput("graph_vars", "Variables del sistema:", choices = vars_num, 
+    checkboxGroupInput("graph_vars", "System variables:", choices = vars_num, 
                        selected = vars_num[1:min(5, length(vars_num))])
   })
   
@@ -460,9 +499,9 @@ server <- function(input, output, session) {
     req(rv$data)
     vars_num <- names(rv$data)[sapply(rv$data, is.numeric)]
     if (length(vars_num) == 0) {
-      return(helpText("No hay variables numericas disponibles para alpha."))
+      return(helpText("No numeric variables available for alpha."))
     }
-    selectInput("alpha_vars", "Variables para alpha (selecciona 2-3):",
+    selectInput("alpha_vars", "Variables for alpha (select 2-3):",
                 choices = vars_num, multiple = TRUE,
                 selected = vars_num[1:min(2, length(vars_num))])
   })
@@ -477,25 +516,25 @@ server <- function(input, output, session) {
     } else {
       vars[1]
     }
-    selectInput("markov_var", "Variable de estados Markov:", choices = vars, selected = default)
+    selectInput("markov_var", "Markov state variable:", choices = vars, selected = default)
   })
   
   output$group_var_ui <- renderUI({
     req(rv$data)
-    vars <- c("Ninguno (Global)", names(rv$data))
+    vars <- c("None (Global)", names(rv$data))
     default <- if ("Region" %in% names(rv$data)) {
       "Region"
     } else if ("Grupo" %in% names(rv$data)) {
       "Grupo"
     } else {
-      "Ninguno (Global)"
+      "None (Global)"
     }
-    selectInput("group_var", "Variable de agrupacion:", choices = vars, selected = default)
+    selectInput("group_var", "Grouping variable:", choices = vars, selected = default)
   })
   
   output$suma_ponderadores <- renderText({
     total <- sum(input$w1, input$w2, input$w3)
-    if (abs(total - 1) < 0.01) paste0(total, " OK") else paste0(total, " (debe sumar 1)")
+    if (abs(total - 1) < 0.01) paste0(total, " OK") else paste0(total, " (must sum to 1)")
   })
   
   # ==========================================================================
@@ -525,7 +564,7 @@ server <- function(input, output, session) {
       return(estados_unicos[order(as.numeric(gsub("Nivel ", "", estados_unicos)))])
     }
     
-    warning("No se pudo determinar el orden logico de estados. Usando orden alfabetico.")
+    warning("Could not determine logical order of states. Using alphabetical order.")
     return(sort(estados_unicos))
   }
   
@@ -587,48 +626,147 @@ server <- function(input, output, session) {
   }
   
   # ==========================================================================
+  # [NUEVO] ANALISIS DE BOOTSTRAP PARA SELECCIÓN DE UMBRAL
+  # ==========================================================================
+  observeEvent(input$run_bootstrap, {
+    req(rv$data)
+    
+    if (is.null(input$graph_vars) || length(input$graph_vars) < 5) {
+      showNotification("Select at least 5 variables for the graph.", type = "error")
+      return()
+    }
+    
+    withProgress(message = 'Running bootstrap...', value = 0, {
+      incProgress(0.1, detail = "Preparing...")
+      
+      datos <- rv$data
+      variables <- input$graph_vars
+      
+      incProgress(0.3, detail = "Calculating threshold stability...")
+      
+      resultado_boot <- seleccionar_umbral_bootstrap(
+        datos = datos,
+        variables = variables,
+        umbrales = seq(0.05, 0.20, 0.01),
+        n_boot = input$boot_n_sim,
+        seed = 123,
+        criterio_jaccard = 0.70
+      )
+      
+      incProgress(0.8, detail = "Generating results...")
+      
+      rv$bootstrap_resultado <- resultado_boot
+      
+      incProgress(1, detail = "Completed")
+    })
+    
+    showNotification("Bootstrap completed.", type = "message")
+  })
+  
+  # Salidas de bootstrap
+  output$bootstrap_results <- renderPrint({
+    req(rv$bootstrap_resultado)
+    
+    res <- rv$bootstrap_resultado
+    
+    cat("=== BOOTSTRAP THRESHOLD SELECTION ===\n\n")
+    cat(sprintf("Number of replicates: %d\n", res$n_boot))
+    cat(sprintf("Jaccard criterion: %.2f\n", res$criterio_jaccard))
+    cat(sprintf("\nOptimal threshold: %.2f\n", res$umbral_optimo))
+    cat(sprintf("   Original node: %s\n", res$nodo_original))
+    cat(sprintf("   Most frequent node in bootstrap: %s\n", res$nodo_mas_frecuente))
+    
+    cat("\n--- Stability by threshold ---\n")
+    print(res$resultados[, c("Umbral", "Jaccard_Promedio", "Pct_Nodo_Estable", "Cumple_Criterio")])
+  })
+  
+  output$bootstrap_plot <- renderPlot({
+    req(rv$bootstrap_resultado)
+    
+    res <- rv$bootstrap_resultado
+    df <- res$resultados
+    
+    ggplot(df, aes(x = Umbral)) +
+      geom_line(aes(y = Jaccard_Promedio, color = "Jaccard"), linewidth = 1.2) +
+      geom_point(aes(y = Jaccard_Promedio, color = "Jaccard"), size = 2) +
+      geom_vline(xintercept = res$umbral_optimo, linetype = "dashed", color = "#C0392B", linewidth = 1) +
+      annotate("text", x = res$umbral_optimo + 0.008, y = max(df$Jaccard_Promedio) * 0.9,
+               label = paste0("Optimal = ", round(res$umbral_optimo, 2)),
+               color = "#C0392B", fontface = "bold", hjust = 0) +
+      scale_y_continuous(labels = scales::percent, limits = c(0, 1)) +
+      labs(title = "Graph stability by threshold (Jaccard)",
+           x = "Correlation threshold", y = "Jaccard similarity") +
+      theme_minimal(base_size = 11) +
+      theme(legend.position = "bottom")
+  })
+  
+  # ==========================================================================
+  # FUNCION PARA PROCESAR TASAS DE AVANCE
+  # ==========================================================================
+  procesar_tasas_avance <- function(orden_estados) {
+    tasas_avance <- NULL
+    if (!is.null(input$tasas_avance_input) && input$tasas_avance_input != "") {
+      tasas_raw <- strsplit(trimws(input$tasas_avance_input), ",")[[1]]
+      tasas_raw <- trimws(tasas_raw)
+      tasas_num <- suppressWarnings(as.numeric(tasas_raw))
+      if (!any(is.na(tasas_num)) && length(tasas_num) > 0) {
+        m <- length(orden_estados)
+        if (length(tasas_num) == (m - 1)) {
+          tasas_avance <- tasas_num
+        } else {
+          showNotification(
+            paste("Expected", m - 1, "rates for", m, "states. Using heuristic."),
+            type = "warning"
+          )
+        }
+      }
+    }
+    return(tasas_avance)
+  }
+  
+  # ==========================================================================
   # EJECUTAR MPCS
   # ==========================================================================
   observeEvent(input$run_mpcs, {
     req(rv$data)
     
     if (is.null(input$graph_vars) || length(input$graph_vars) < 5) {
-      showNotification("Seleccione al menos 5 variables.", type = "error")
+      showNotification("Select at least 5 variables.", type = "error")
       output$validation_msg <- renderUI({ 
         tags$div(class = "alert alert-danger mt-2", 
                  icon("exclamation-triangle"), 
-                 " Seleccione al menos 5 variables.")
+                 " Select at least 5 variables.")
       })
       return()
     }
     output$validation_msg <- renderUI({ NULL })
     
     if (is.null(input$markov_var) || input$markov_var == "") {
-      showNotification("Seleccione una variable de estados Markov.", type = "error")
+      showNotification("Select a Markov state variable.", type = "error")
       output$validation_msg <- renderUI({ 
         tags$div(class = "alert alert-danger mt-2", 
                  icon("exclamation-triangle"), 
-                 " Seleccione una variable de estados Markov.")
+                 " Select a Markov state variable.")
       })
       return()
     }
     
     estados <- rv$data[[input$markov_var]]
     if (length(unique(na.omit(estados))) < 3) {
-      showNotification("La variable de Markov debe tener al menos 3 estados.", type = "error")
+      showNotification("Markov variable must have at least 3 states.", type = "error")
       output$validation_msg <- renderUI({ 
         tags$div(class = "alert alert-danger mt-2", 
                  icon("exclamation-triangle"), 
-                 " La variable de Markov debe tener al menos 3 estados.")
+                 " Markov variable must have at least 3 states.")
       })
       return()
     }
     output$validation_msg <- renderUI({ NULL })
     
-    withProgress(message = 'Ejecutando MPCS...', value = 0, {
+    withProgress(message = 'Running MPCS...', value = 0, {
       data_analysis <- rv$data
       
-      if (input$group_var == "Ninguno (Global)") {
+      if (input$group_var == "None (Global)") {
         data_analysis$Group <- "Global"
         grupos <- "Global"
       } else {
@@ -641,12 +779,12 @@ server <- function(input, output, session) {
       
       for (i in seq_along(grupos)) {
         g <- grupos[i]
-        incProgress(1 / length(grupos), detail = paste("Procesando grupo:", g))
+        incProgress(1 / length(grupos), detail = paste("Processing group:", g))
         
         sub <- data_analysis[data_analysis$Group == g, ]
         
         if (nrow(sub) < 30) {
-          showNotification(paste("Grupo", g, "tiene menos de 30 observaciones. Saltando."), type = "message")
+          showNotification(paste("Group", g, "has less than 30 observations. Skipping."), type = "message")
           next
         }
         
@@ -655,9 +793,9 @@ server <- function(input, output, session) {
         graph_res <- calcular_grafo(graph_data, input$graph_vars, input$threshold)
         
         if (is.null(graph_res$graph) || vcount(graph_res$graph) < 2) {
-          showNotification(paste("Grupo", g, "no tiene suficientes conexiones en el grafo. Usando valor por defecto."), type = "message")
+          showNotification(paste("Group", g, "has insufficient connections in the graph. Using default value."), type = "message")
           graph_res$score <- 0.5
-          graph_res$optimal_node <- "Sin nodo"
+          graph_res$optimal_node <- "No node"
           graph_res$graph <- NULL
         }
         
@@ -671,11 +809,17 @@ server <- function(input, output, session) {
         orden_estados <- detectar_orden_estados(estados_unicos)
         
         # ============================================================
-        # Markov CON ORDEN CORRECTO
+        # [NUEVO] PROCESAR TASAS DE AVANCE DESDE INPUT
+        # ============================================================
+        tasas_avance <- procesar_tasas_avance(orden_estados)
+        
+        # ============================================================
+        # Markov CON ORDEN CORRECTO Y TASAS DE AVANCE
         # ============================================================
         markov_res <- calcular_markov(
           sub[[input$markov_var]], 
           orden_estados = orden_estados,
+          tasas_avance = tasas_avance,
           umbral_objetivo = 0.50, 
           horizonte = 10
         )
@@ -701,7 +845,7 @@ server <- function(input, output, session) {
         results_list[[as.character(g)]] <- list(
           grupo = g,
           n = nrow(sub),
-          nodo_optimo = if (is.null(graph_res$optimal_node)) "Sin nodo" else graph_res$optimal_node,
+          nodo_optimo = if (is.null(graph_res$optimal_node)) "No node" else graph_res$optimal_node,
           I_grafo = graph_res$score,
           I_markov = markov_res$score,
           I_juegos = games_res$score,
@@ -720,7 +864,7 @@ server <- function(input, output, session) {
       }
       
       if (length(results_list) == 0) {
-        showNotification("No se pudo procesar ningun grupo. Verifique que al menos un grupo tenga >30 observaciones.", type = "error")
+        showNotification("Could not process any group. Verify that at least one group has >30 observations.", type = "error")
         return()
       }
       
@@ -732,20 +876,16 @@ server <- function(input, output, session) {
         if (!is.null(r$markov_mat) && !is.null(r$sim_base)) {
           P_n <- r$markov_mat
           
-          # Usar el k calculado por el modelo para este grupo
           k_nudge <- r$k
           if (is.na(k_nudge) || k_nudge < 0 || k_nudge > 1) k_nudge <- 0.4
           
-          # Aplicar nudge a la matriz de transicion
           for (i in 1:(nrow(P_n)-1)) {
             av <- P_n[i, i] * k_nudge
             P_n[i, i] <- P_n[i, i] - av
             P_n[i, i+1] <- P_n[i, i+1] + av
-            # Normalizar la fila para que sume 1
             P_n[i, ] <- P_n[i, ] / sum(P_n[i, ])
           }
           
-          # Simular con la matriz nudged
           sim_nudge <- r$sim_base
           for (j in 2:nrow(sim_nudge)) {
             sim_nudge[j, ] <- sim_nudge[j-1, ] %*% P_n
@@ -762,7 +902,7 @@ server <- function(input, output, session) {
           n = r$n,
           Alpha = round(r$alpha, 3),
           I_Markov_H10 = round(r$I_markov, 4),
-          I_Juegos = round(r$I_juegos, 4),
+          I_Games = round(r$I_juegos, 4),
           I_MPCS = round(r$I_MPCS, 4),
           Nodo_Optimo = r$nodo_optimo,
           k = round(r$k, 4),
@@ -783,7 +923,7 @@ server <- function(input, output, session) {
         dominio = rv$dominio
       )
       
-      showNotification(paste("MPCS ejecutado correctamente para", nrow(results_df), "grupos."), type = "message")
+      showNotification(paste("MPCS executed successfully for", nrow(results_df), "groups."), type = "message")
     })
   })
   
@@ -813,8 +953,8 @@ server <- function(input, output, session) {
       p_graph <- function() {
         plot(r$graph, layout = layout_with_fr(r$graph), vertex.label.cex = 0.8,
              vertex.label.color = "black", vertex.label.dist = 2, edge.color = "gray60",
-             edge.width = 1.5, main = paste("Grafo del sistema -", first_group), cex.main = 0.9)
-        legend("topright", legend = c("Nodo optimo", "Otros nodos"), 
+             edge.width = 1.5, main = paste("Behavioral Graph -", first_group), cex.main = 0.9)
+        legend("topright", legend = c("Optimal node", "Other nodes"), 
                fill = c("#C0392B", "#F0DFC0"), cex = 0.8, bty = "n")
       }
     }
@@ -826,12 +966,12 @@ server <- function(input, output, session) {
         plot_data <- data[!is.na(data$Group) & !is.na(data[[markov_var]]), ]
         if (nrow(plot_data) == 0) {
           return(ggplot() + theme_void() + 
-                   annotate("text", x = 0.5, y = 0.5, label = "No hay datos"))
+                   annotate("text", x = 0.5, y = 0.5, label = "No data"))
         }
         ggplot(plot_data, aes(x = .data[["Group"]], fill = .data[[markov_var]])) + 
           geom_bar(position = "fill") +
           scale_fill_brewer(palette = "Set2") + theme_minimal() +
-          labs(x = "Grupo", y = "Proporcion", fill = "Estado") +
+          labs(x = "Group", y = "Proportion", fill = "State") +
           theme(axis.text.x = element_text(angle = 45, hjust = 1))
       }
     }
@@ -841,7 +981,7 @@ server <- function(input, output, session) {
       p_rank <- function() {
         ggplot(results, aes(x = reorder(Grupo, I_MPCS), y = I_MPCS, fill = Tipo_Nudge)) +
           geom_col(width = 0.7) + coord_flip() + theme_minimal(base_size = 12) +
-          labs(x = "Grupo", y = "Indice MPCS", fill = "Tipo Nudge") +
+          labs(x = "Group", y = "MPCS Index", fill = "Nudge Type") +
           scale_fill_manual(
             values = c("Informational" = "#74B3CE", "Structural" = "#2E86AB",
                        "Normative" = "#E84855", "Systemic multi-nudge" = "#1A3A5C")
@@ -851,24 +991,24 @@ server <- function(input, output, session) {
       }
     }
     
-    # --- Trayectorias de Markov (AQUI APARECEN LAS DOS LINEAS) ---
+    # --- Trayectorias de Markov ---
     p_markov <- function() {
       if (!is.null(r$sim_base) && nrow(r$sim_base) > 0) {
         y_label <- if (dominio == "educacion" || any(grepl("Participacion", colnames(r$sim_base)))) {
-          "Probabilidad de participacion"
+          "Participation probability"
         } else {
-          "Probabilidad de ocupacion"
+          "Occupation probability"
         }
         return(graficar_trayectorias_markov(
           sim_base = r$sim_base, 
-          sim_nudge = r$sim_nudge,  # <--- PASAMOS SIM_NUDGE
+          sim_nudge = r$sim_nudge,
           estados = colnames(r$sim_base),
-          titulo = paste("Trayectorias de Markov -", first_group),
+          titulo = paste("Markov Trajectories -", first_group),
           y_label = y_label
         ))
       }
       return(ggplot() + theme_void() + 
-               annotate("text", x = 0.5, y = 0.5, label = "No hay datos para trayectorias"))
+               annotate("text", x = 0.5, y = 0.5, label = "No data for trajectories"))
     }
     
     # --- Arbol de Markov ---
@@ -886,11 +1026,11 @@ server <- function(input, output, session) {
           P = r$markov_mat,
           estados = estados_arbol,
           umbral_prob = 0.05,
-          titulo = paste("Transiciones de Markov -", first_group)
+          titulo = paste("Markov Transitions -", first_group)
         ))
       }
       return(ggplot() + theme_void() + 
-               annotate("text", x = 0.5, y = 0.5, label = "No hay datos para arbol de Markov"))
+               annotate("text", x = 0.5, y = 0.5, label = "No data for Markov tree"))
     }
     
     # --- Juego evolutivo ---
@@ -899,11 +1039,11 @@ server <- function(input, output, session) {
         return(graficar_juego_evolutivo(
           alpha = r$alpha,
           p_star = r$I_juegos,
-          titulo = paste("Dinamica Replicadora -", first_group)
+          titulo = paste("Replicator Dynamics -", first_group)
         ))
       }
       return(ggplot() + theme_void() + 
-               annotate("text", x = 0.5, y = 0.5, label = "No hay datos para teoria de juegos"))
+               annotate("text", x = 0.5, y = 0.5, label = "No data for game theory"))
     }
     
     return(list(graph = p_graph, states = p_states, markov = p_markov, rank = p_rank,
@@ -916,14 +1056,14 @@ server <- function(input, output, session) {
   output$results_table <- renderDT({
     req(rv$results_df)
     datatable(rv$results_df, options = list(scrollX = TRUE, pageLength = 10), rownames = FALSE) %>%
-      formatRound(columns = c("I_Markov_H10", "I_Juegos", "I_MPCS", "k"), digits = 4)
+      formatRound(columns = c("I_Markov_H10", "I_Games", "I_MPCS", "k"), digits = 4)
   })
   
   output$plot_graph <- renderPlot({
     req(rv$plots)
     if (!is.null(rv$plots$graph)) rv$plots$graph() else {
       plot(0, type = "n", axes = FALSE, xlab = "", ylab = "")
-      text(0, 0, "No se pudo generar el grafo.")
+      text(0, 0, "Could not generate graph.")
     }
   })
   
@@ -931,7 +1071,7 @@ server <- function(input, output, session) {
     req(rv$plots)
     if (!is.null(rv$plots$states)) rv$plots$states() else {
       ggplot() + theme_void() + 
-        annotate("text", x = 0.5, y = 0.5, label = "No se pudo generar el grafico.")
+        annotate("text", x = 0.5, y = 0.5, label = "Could not generate chart.")
     }
   })
   
@@ -939,7 +1079,7 @@ server <- function(input, output, session) {
     req(rv$plots)
     if (!is.null(rv$plots$markov)) rv$plots$markov() else {
       ggplot() + theme_void() + 
-        annotate("text", x = 0.5, y = 0.5, label = "No se pudo generar el grafico.")
+        annotate("text", x = 0.5, y = 0.5, label = "Could not generate chart.")
     }
   })
   
@@ -947,7 +1087,7 @@ server <- function(input, output, session) {
     req(rv$plots)
     if (!is.null(rv$plots$rank)) rv$plots$rank() else {
       ggplot() + theme_void() + 
-        annotate("text", x = 0.5, y = 0.5, label = "No se pudo generar el grafico.")
+        annotate("text", x = 0.5, y = 0.5, label = "Could not generate chart.")
     }
   })
   
@@ -957,7 +1097,7 @@ server <- function(input, output, session) {
       rv$plots$arbol()
     } else {
       ggplot() + theme_void() + 
-        annotate("text", x = 0.5, y = 0.5, label = "No se pudo generar el arbol de Markov.")
+        annotate("text", x = 0.5, y = 0.5, label = "Could not generate Markov tree.")
     }
   })
   
@@ -965,7 +1105,7 @@ server <- function(input, output, session) {
     req(rv$plots)
     if (!is.null(rv$plots$juego)) rv$plots$juego() else {
       ggplot() + theme_void() + 
-        annotate("text", x = 0.5, y = 0.5, label = "No se pudo generar el grafico de juegos.")
+        annotate("text", x = 0.5, y = 0.5, label = "Could not generate game theory chart.")
     }
   })
   
@@ -975,7 +1115,7 @@ server <- function(input, output, session) {
   observeEvent(input$run_sensitivity, {
     
     if (is.null(rv$results_df) || nrow(rv$results_df) == 0) {
-      showNotification("Primero ejecuta el MPCS para obtener resultados.", type = "error")
+      showNotification("First run MPCS to get results.", type = "error")
       return()
     }
     
@@ -985,7 +1125,7 @@ server <- function(input, output, session) {
     r <- rv$results[[as.character(top_group)]]
     
     if (is.null(r)) {
-      showNotification("No se encontraron resultados para el grupo seleccionado.", type = "error")
+      showNotification("No results found for selected group.", type = "error")
       return()
     }
     
@@ -998,12 +1138,12 @@ server <- function(input, output, session) {
     if (is.na(I_Juegos)) I_Juegos <- 0.5
     
     showNotification(
-      paste("Ejecutando analisis de sensibilidad para el grupo:", top_group),
+      paste("Running sensitivity analysis for group:", top_group),
       type = "message",
       duration = 2
     )
     
-    withProgress(message = 'Analizando sensibilidad...', value = 0, {
+    withProgress(message = 'Analyzing sensitivity...', value = 0, {
       
       resultado_sens <- analisis_sensibilidad(
         I_Grafo = I_Grafo,
@@ -1015,14 +1155,14 @@ server <- function(input, output, session) {
         seed = 123
       )
       
-      incProgress(0.8, detail = "Generando graficos...")
+      incProgress(0.8, detail = "Generating charts...")
       
       rv$sens_resultado <- resultado_sens
       
-      incProgress(1, detail = "Completado")
+      incProgress(1, detail = "Completed")
     })
     
-    showNotification("Analisis de sensibilidad completado.", type = "message")
+    showNotification("Sensitivity analysis completed.", type = "message")
   })
   
   output$sens_plot <- renderPlot({
@@ -1054,16 +1194,16 @@ server <- function(input, output, session) {
       annotate("text", 
                x = rv$sens_resultado$I_MPCS_default + 0.008, 
                y = max(table(cut(df$I_MPCS, breaks = 50))) * 0.9,
-               label = paste0("Pesos por defecto\nI_MPCS = ", 
+               label = paste0("Default weights\nI_MPCS = ", 
                              round(rv$sens_resultado$I_MPCS_default, 4)),
                hjust = 0, size = 3.5, color = "#C0392B") +
       scale_fill_manual(values = colores_filtrados) +
       labs(
-        title = "Analisis de Sensibilidad del Indice MPCS",
-        subtitle = paste0(rv$sens_resultado$n_sim, " combinaciones aleatorias de pesos w1, w2, w3"),
-        x = "Indice MPCS",
-        y = "Frecuencia",
-        fill = "Tipo de nudge"
+        title = "Sensitivity Analysis of MPCS Index",
+        subtitle = paste0(rv$sens_resultado$n_sim, " random combinations of weights w1, w2, w3"),
+        x = "MPCS Index",
+        y = "Frequency",
+        fill = "Nudge type"
       ) +
       theme_minimal(base_size = 13) +
       theme(
@@ -1078,30 +1218,30 @@ server <- function(input, output, session) {
     
     s <- rv$sens_resultado
     
-    cat("=== RESULTADOS DEL ANALISIS DE SENSIBILIDAD ===\n\n")
-    cat(sprintf("Numero de simulaciones: %d\n", s$n_sim))
-    cat(sprintf("Media de I_MPCS: %.4f\n", s$stats$media))
-    cat(sprintf("Desviacion estandar: %.4f\n", s$stats$sd))
-    cat(sprintf("Coeficiente de variacion: %.1f%%\n", s$stats$cv))
-    cat(sprintf("Intervalo de confianza 95%%: [%.4f, %.4f]\n", 
+    cat("=== SENSITIVITY ANALYSIS RESULTS ===\n\n")
+    cat(sprintf("Number of simulations: %d\n", s$n_sim))
+    cat(sprintf("Mean I_MPCS: %.4f\n", s$stats$media))
+    cat(sprintf("Standard deviation: %.4f\n", s$stats$sd))
+    cat(sprintf("Coefficient of variation: %.1f%%\n", s$stats$cv))
+    cat(sprintf("95%% Confidence interval: [%.4f, %.4f]\n", 
                 s$ic_inf, s$ic_sup))
-    cat(sprintf("I_MPCS con pesos por defecto: %.4f\n", s$I_MPCS_default))
-    cat(sprintf("Tipo de nudge por defecto: %s\n", s$tipo_default))
-    cat(sprintf("\nTipo de nudge mas frecuente en simulaciones: %s (%.1f%%)\n",
+    cat(sprintf("I_MPCS with default weights: %.4f\n", s$I_MPCS_default))
+    cat(sprintf("Default nudge type: %s\n", s$tipo_default))
+    cat(sprintf("\nMost frequent nudge type in simulations: %s (%.1f%%)\n",
                 s$tipo_mas_frecuente, s$pct_mas_frecuente))
-    cat(sprintf("Coincidencia con tipo por defecto: %.1f%%\n", 
+    cat(sprintf("Agreement with default type: %.1f%%\n", 
                 s$pct_coincidencia))
     
-    cat("\n=== INTERPRETACION ===\n")
+    cat("\n=== INTERPRETATION ===\n")
     if (s$pct_coincidencia >= 70) {
-      cat("La recomendacion de nudge es ALTAMENTE ROBUSTA.\n")
-      cat("  El tipo de nudge se mantiene en mas del 70% de las simulaciones.\n")
+      cat("The nudge recommendation is HIGHLY ROBUST.\n")
+      cat("  The nudge type remains in more than 70% of simulations.\n")
     } else if (s$pct_coincidencia >= 50) {
-      cat("La recomendacion de nudge es ROBUSTA.\n")
-      cat("  El tipo de nudge se mantiene en mas del 50% de las simulaciones.\n")
+      cat("The nudge recommendation is ROBUST.\n")
+      cat("  The nudge type remains in more than 50% of simulations.\n")
     } else {
-      cat("La recomendacion de nudge es SENSIBLE a los pesos.\n")
-      cat("  Se recomienda revisar la ponderacion o realizar un analisis adicional.\n")
+      cat("The nudge recommendation is SENSITIVE to weights.\n")
+      cat("  Consider reviewing the weighting or conducting additional analysis.\n")
     }
   })
   
@@ -1116,26 +1256,26 @@ server <- function(input, output, session) {
     
     HTML(paste0(
       "<div class='well'>",
-      "<p><b>Resumen de resultados</b></p>",
-      "<p>Se analizaron <b>", nrow(rv$results_df), " grupos</b> con un total de <b>", 
-      sum(rv$results_df$n), " observaciones</b>.</p>",
-      "<p><b>Dominio:</b> ",
-      ifelse(any(grepl("Participacion", names(rv$data))), "Educacion - Participacion en el aula", "Salud - Adherencia a medicamentos"),
+      "<p><b>Results Summary</b></p>",
+      "<p>Analyzed <b>", nrow(rv$results_df), " groups</b> with a total of <b>", 
+      sum(rv$results_df$n), " observations</b>.</p>",
+      "<p><b>Domain:</b> ",
+      ifelse(any(grepl("Participacion", names(rv$data))), "Education - Classroom participation", "Health - Medication adherence"),
       "</p>",
       "<hr>",
-      "<p><b>Grupo con mayor prioridad:</b> <span style='color:#C0392B;font-weight:bold;'>", 
+      "<p><b>Highest priority group:</b> <span style='color:#C0392B;font-weight:bold;'>", 
       top_group$Grupo, "</span> (I_MPCS = ", round(top_group$I_MPCS, 4), ")</p>",
-      "<p>El nodo optimo para la intervencion es <b>", top_group$Nodo_Optimo, "</b>.</p>",
-      "<p>Se recomienda aplicar un <b>", top_group$Tipo_Nudge, 
-      "</b> con intensidad k = ", round(top_group$k, 4), ".</p>",
-      "<p><b>Masa critica estimada:</b> ", round(top_group$I_Juegos * 100, 1), 
-      "% de adoptantes necesarios para que el cambio sea autosostenible.</p>",
+      "<p>The optimal intervention node is <b>", top_group$Nodo_Optimo, "</b>.</p>",
+      "<p>Recommended nudge type: <b>", top_group$Tipo_Nudge, 
+      "</b> with intensity k = ", round(top_group$k, 4), ".</p>",
+      "<p><b>Estimated critical mass:</b> ", round(top_group$I_Games * 100, 1), 
+      "% of adopters needed for self-sustaining change.</p>",
       "<hr>",
-      "<p><b>Grupo con menor prioridad:</b> <span style='color:#2ECC71;font-weight:bold;'>", 
+      "<p><b>Lowest priority group:</b> <span style='color:#2ECC71;font-weight:bold;'>", 
       bottom_group$Grupo, "</span> (I_MPCS = ", round(bottom_group$I_MPCS, 4), ")</p>",
-      "<p><b>Recomendacion:</b> Enfocar los esfuerzos en el grupo con mayor prioridad (", 
-      top_group$Grupo, ") y aplicar un nudge de tipo <b>", top_group$Tipo_Nudge, 
-      "</b> con intensidad ", round(top_group$k * 100, 1), "%.</p>",
+      "<p><b>Recommendation:</b> Focus efforts on the highest priority group (", 
+      top_group$Grupo, ") and apply a <b>", top_group$Tipo_Nudge, 
+      "</b> nudge with intensity ", round(top_group$k * 100, 1), "%.</p>",
       "</div>"
     ))
   })
@@ -1145,7 +1285,7 @@ server <- function(input, output, session) {
   # ==========================================================================
   output$download_csv <- downloadHandler(
     filename = function() {
-      paste0("MPCS_Resultados_", Sys.Date(), ".csv")
+      paste0("MPCS_Results_", Sys.Date(), ".csv")
     },
     content = function(file) {
       req(rv$results_df)
@@ -1155,11 +1295,11 @@ server <- function(input, output, session) {
   
   output$download_report <- downloadHandler(
     filename = function() {
-      paste0("MPCS_Reporte_", Sys.Date(), ".html")
+      paste0("MPCS_Report_", Sys.Date(), ".html")
     },
     content = function(file) {
       if (is.null(rv$results_df) || nrow(rv$results_df) == 0) {
-        showNotification("No hay resultados para generar el reporte.", type = "error")
+        showNotification("No results to generate report.", type = "error")
         return()
       }
       
@@ -1170,7 +1310,7 @@ server <- function(input, output, session) {
         "<html>",
         "<head>",
         "<meta charset='UTF-8'>",
-        "<title>Reporte MPCS</title>",
+        "<title>MPCS Report</title>",
         "<style>",
         "body { font-family: Arial, sans-serif; margin: 40px; max-width: 1000px; margin-left: auto; margin-right: auto; }",
         "h1 { color: #2C3E50; border-bottom: 3px solid #3498DB; padding-bottom: 10px; }",
@@ -1185,20 +1325,20 @@ server <- function(input, output, session) {
         "</style>",
         "</head>",
         "<body>",
-        "<h1>Reporte del MPCS</h1>",
-        "<p><b>Fecha de generacion:</b> ", format(Sys.Date(), "%d de %B de %Y"), 
-        " a las ", format(Sys.time(), "%H:%M"), "</p>",
-        "<p><b>Dominio:</b> ",
-        ifelse(any(grepl("Participacion", names(rv$data))), "Educacion - Participacion en el aula", "Salud - Adherencia a medicamentos"),
+        "<h1>MPCS Report</h1>",
+        "<p><b>Generation date:</b> ", format(Sys.Date(), "%B %d, %Y"), 
+        " at ", format(Sys.time(), "%H:%M"), "</p>",
+        "<p><b>Domain:</b> ",
+        ifelse(any(grepl("Participacion", names(rv$data))), "Education - Classroom participation", "Health - Medication adherence"),
         "</p>",
         "<hr>",
-        "<h2>1. Resumen de resultados</h2>",
-        "<p><b>Grupos analizados:</b> ", nrow(rv$results_df), "</p>",
-        "<p><b>Total de observaciones:</b> ", sum(rv$results_df$n), "</p>",
+        "<h2>1. Results Summary</h2>",
+        "<p><b>Groups analyzed:</b> ", nrow(rv$results_df), "</p>",
+        "<p><b>Total observations:</b> ", sum(rv$results_df$n), "</p>",
         "<br>",
-        "<h2>2. Tabla de resultados</h2>",
+        "<h2>2. Results Table</h2>",
         "<table>",
-        "<thead><tr><th>Grupo</th><th>n</th><th>Alpha</th><th>I_Markov_H10</th><th>I_Juegos</th><th>I_MPCS</th><th>Nodo optimo</th><th>k</th><th>Tipo Nudge</th></tr></thead>",
+        "<thead><tr><th>Group</th><th>n</th><th>Alpha</th><th>I_Markov_H10</th><th>I_Games</th><th>I_MPCS</th><th>Optimal Node</th><th>k</th><th>Nudge Type</th></tr></thead>",
         "<tbody>"
       )
       
@@ -1206,7 +1346,7 @@ server <- function(input, output, session) {
         row <- rv$results_df[i, ]
         is_top <- row$I_MPCS == max(rv$results_df$I_MPCS)
         bg_color <- if (is_top) " style='background-color: #FFEAA7;'" else ""
-        icono <- if (is_top) " [PRIORITARIO]" else ""
+        icono <- if (is_top) " [PRIORITY]" else ""
         html_lines <- c(
           html_lines,
           paste0("<tr", bg_color, ">"),
@@ -1214,7 +1354,7 @@ server <- function(input, output, session) {
           paste0("<td>", row$n, "</td>"),
           paste0("<td>", round(row$Alpha, 3), "</td>"),
           paste0("<td>", round(row$I_Markov_H10, 4), "</td>"),
-          paste0("<td>", round(row$I_Juegos, 4), "</td>"),
+          paste0("<td>", round(row$I_Games, 4), "</td>"),
           paste0("<td><b>", round(row$I_MPCS, 4), "</b></td>"),
           paste0("<td>", row$Nodo_Optimo, "</td>"),
           paste0("<td>", round(row$k, 4), "</td>"),
@@ -1226,23 +1366,23 @@ server <- function(input, output, session) {
       html_lines <- c(
         html_lines,
         "</tbody></table>",
-        "<h2>3. Interpretacion de resultados</h2>",
+        "<h2>3. Interpretation</h2>",
         "<div class='highlight'>",
-        "<p><b>Grupo con mayor prioridad de intervencion:</b></p>",
+        "<p><b>Highest priority group for intervention:</b></p>",
         "<ul>",
-        "<li><b>Grupo:</b> ", top_group$Grupo, "</li>",
-        "<li><b>Indice MPCS:</b> ", round(top_group$I_MPCS, 4), "</li>",
-        "<li><b>Nodo optimo de intervencion:</b> ", top_group$Nodo_Optimo, "</li>",
-        "<li><b>Intensidad recomendada (k):</b> ", round(top_group$k, 4), "</li>",
-        "<li><b>Tipo de nudge recomendado:</b> <b>", top_group$Tipo_Nudge, "</b></li>",
-        "<li><b>Masa critica:</b> ", round(top_group$I_Juegos * 100, 1), "% de adoptantes necesarios</li>",
+        "<li><b>Group:</b> ", top_group$Grupo, "</li>",
+        "<li><b>MPCS Index:</b> ", round(top_group$I_MPCS, 4), "</li>",
+        "<li><b>Optimal intervention node:</b> ", top_group$Nodo_Optimo, "</li>",
+        "<li><b>Recommended intensity (k):</b> ", round(top_group$k, 4), "</li>",
+        "<li><b>Recommended nudge type:</b> <b>", top_group$Tipo_Nudge, "</b></li>",
+        "<li><b>Critical mass:</b> ", round(top_group$I_Games * 100, 1), "% of adopters needed</li>",
         "</ul>",
         "</div>",
-        "<h2>4. Citacion</h2>",
+        "<h2>4. Citation</h2>",
         "<p>MPCS: A method for the systematic design of behavioral nudges... (Zela Llanque, 2026).</p>",
         "<div class='footer'>",
-        "<p>Reporte generado automaticamente por <b>MPCS Calculator</b></p>",
-        "<p>Repositorio: <a href='https://github.com/Izela-meth/MPCS_APP' target='_blank'>",
+        "<p>Report automatically generated by <b>MPCS Calculator</b></p>",
+        "<p>Repository: <a href='https://github.com/Izela-meth/MPCS_APP' target='_blank'>",
         "https://github.com/Izela-meth/MPCS_APP</a></p>",
         "</div>",
         "</body>",
@@ -1250,7 +1390,7 @@ server <- function(input, output, session) {
       )
       
       writeLines(html_lines, file)
-      showNotification("Reporte HTML generado correctamente.", type = "message")
+      showNotification("HTML report generated successfully.", type = "message")
     }
   )
 }
@@ -1290,10 +1430,10 @@ ui <- tagList(
   ")),
   tags$footer(
     class = "mpcs-footer",
-    "MPCS Calculator v1.0 - Desarrollado por el equipo MPCS | ",
+    "MPCS Calculator v1.0 - Developed by the MPCS Team | ",
     tags$a(href = "https://github.com/Izela-meth/MPCS_APP", target = "_blank", "GitHub"),
     " | ",
-    tags$a(href = "mailto:izela@unsa.edu.pe", "Contacto")
+    tags$a(href = "mailto:izela@unsa.edu.pe", "Contact")
   )
 )
 
