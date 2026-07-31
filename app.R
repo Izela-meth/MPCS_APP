@@ -212,7 +212,7 @@ ui <- page_navbar(
       column(
         width = 6,
         wellPanel(
-          h5("Arbol de Transicion de Markov"),
+          h5("Transiciones de Markov"),
           plotOutput("plot_arbol_markov", height = "450px")
         )
       ),
@@ -472,6 +472,8 @@ server <- function(input, output, session) {
     vars <- names(rv$data)
     default <- if ("Estado_Markov" %in% vars) {
       "Estado_Markov"
+    } else if ("Estado_Participacion" %in% vars) {
+      "Estado_Participacion"
     } else {
       vars[1]
     }
@@ -483,6 +485,8 @@ server <- function(input, output, session) {
     vars <- c("Ninguno (Global)", names(rv$data))
     default <- if ("Region" %in% names(rv$data)) {
       "Region"
+    } else if ("Grupo" %in% names(rv$data)) {
+      "Grupo"
     } else {
       "Ninguno (Global)"
     }
@@ -493,6 +497,45 @@ server <- function(input, output, session) {
     total <- sum(input$w1, input$w2, input$w3)
     if (abs(total - 1) < 0.01) paste0(total, " OK") else paste0(total, " (debe sumar 1)")
   })
+  
+  # ==========================================================================
+  # FUNCION PARA DETECTAR ORDEN LOGICO DE ESTADOS (MEJORADA)
+  # ==========================================================================
+  detectar_orden_estados <- function(estados_unicos) {
+    
+    # --- Caso 1: Estados de salud (E1, E2, E3, E4, E5) ---
+    if (all(grepl("^E[0-9]+$", estados_unicos))) {
+      return(estados_unicos[order(as.numeric(gsub("E", "", estados_unicos)))])
+    }
+    
+    # --- Caso 2: Estados de participacion en aula ---
+    orden_aula <- c("Nunca", "Rara_vez", "A_veces", "Casi_siempre")
+    if (any(orden_aula %in% estados_unicos)) {
+      # Devolver SOLO los que estan presentes, en el orden correcto
+      return(orden_aula[orden_aula %in% estados_unicos])
+    }
+    
+    # --- Caso 3: Estados con "Bajo", "Medio", "Alto" ---
+    orden_bma <- c("Bajo", "Medio", "Alto")
+    if (any(orden_bma %in% estados_unicos)) {
+      return(orden_bma[orden_bma %in% estados_unicos])
+    }
+    
+    # --- Caso 4: Estados numericos ---
+    if (all(grepl("^[0-9]+$", estados_unicos))) {
+      return(as.character(sort(as.numeric(estados_unicos))))
+    }
+    
+    # --- Caso 5: Estados con "Nivel 1", "Nivel 2", "Nivel 3" ---
+    if (all(grepl("^Nivel [0-9]+$", estados_unicos))) {
+      return(estados_unicos[order(as.numeric(gsub("Nivel ", "", estados_unicos)))])
+    }
+    
+    # --- Caso 6: Intentar detectar orden por frecuencia (fallback) ---
+    # Si no se puede determinar, usar orden alfabetico CON ADVERTENCIA
+    warning("No se pudo determinar el orden logico de estados. Usando orden alfabetico.")
+    return(sort(estados_unicos))
+  }
   
   # ==========================================================================
   # FUNCION PARA CALCULAR ALPHA
@@ -531,6 +574,10 @@ server <- function(input, output, session) {
     } else {
       if ("Acceso_salud" %in% names(sub)) {
         alpha <- mean(sub$Acceso_salud, na.rm = TRUE)
+      } else if (all(c("Peer_Influence", "Teacher_Encouragement") %in% names(sub))) {
+        peer_norm <- (sub$Peer_Influence - 1) / 3
+        teacher_norm <- sub$Teacher_Encouragement / 10
+        alpha <- mean(rowMeans(cbind(peer_norm, teacher_norm), na.rm = TRUE), na.rm = TRUE)
       } else {
         vars_num <- names(sub)[sapply(sub, is.numeric)]
         if (length(vars_num) > 0) {
@@ -611,6 +658,7 @@ server <- function(input, output, session) {
           next
         }
         
+        # --- Grafo ---
         graph_data <- sub[, input$graph_vars, drop = FALSE]
         graph_res <- calcular_grafo(graph_data, input$graph_vars, input$threshold)
         
@@ -623,12 +671,31 @@ server <- function(input, output, session) {
         
         alpha_grupo <- calcular_alpha(sub)
         
-        markov_res <- calcular_markov(sub[[input$markov_var]], 
-                                      umbral_objetivo = 0.50, 
-                                      horizonte = 10)
+        # ============================================================
+        # [CORREGIDO] DETECTAR ORDEN LOGICO DE ESTADOS
+        # ============================================================
+        estados_unicos <- unique(sub[[input$markov_var]])
+        estados_unicos <- estados_unicos[!is.na(estados_unicos) & estados_unicos != ""]
+        orden_estados <- detectar_orden_estados(estados_unicos)
         
+        # ============================================================
+        # Markov CON ORDEN CORRECTO
+        # ============================================================
+        markov_res <- calcular_markov(
+          sub[[input$markov_var]], 
+          orden_estados = orden_estados,
+          umbral_objetivo = 0.50, 
+          horizonte = 10
+        )
+        
+        # ============================================================
+        # Juegos
+        # ============================================================
         games_res <- calcular_juegos(markov_res$mat, input$R_factor, alpha = alpha_grupo)
         
+        # ============================================================
+        # Indice integrado
+        # ============================================================
         index_res <- calcular_indice(
           I_grafo = graph_res$score,
           I_markov = markov_res$score,
@@ -656,6 +723,7 @@ server <- function(input, output, session) {
           sim_base = markov_res$sim_base,
           dist_actual = markov_res$dist_actual,
           T_base = markov_res$T_base,
+          # --- GUARDAR ESTADOS EN ORDEN CORRECTO ---
           estados = colnames(markov_res$mat)
         )
       }
@@ -665,6 +733,7 @@ server <- function(input, output, session) {
         return()
       }
       
+      # Calcular sim_nudge para cada grupo
       for (g in names(results_list)) {
         r <- results_list[[g]]
         if (!is.null(r$markov_mat) && !is.null(r$sim_base)) {
@@ -735,6 +804,7 @@ server <- function(input, output, session) {
     first_group <- results$Grupo[1]
     r <- results_list[[as.character(first_group)]]
     
+    # --- Grafo ---
     if (!is.null(r$graph) && vcount(r$graph) > 0) {
       V(r$graph)$color <- ifelse(V(r$graph)$name == r$nodo_optimo, "#C0392B", "#F0DFC0")
       V(r$graph)$size <- ifelse(V(r$graph)$name == r$nodo_optimo, 25, 15)
@@ -747,6 +817,7 @@ server <- function(input, output, session) {
       }
     }
     
+    # --- Distribucion de estados ---
     if (!is.null(markov_var) && markov_var %in% names(data)) {
       p_states <- function() {
         if (!"Group" %in% names(data)) data$Group <- "Global"
@@ -763,6 +834,7 @@ server <- function(input, output, session) {
       }
     }
     
+    # --- Ranking ---
     if (!is.null(results) && nrow(results) > 0) {
       p_rank <- function() {
         ggplot(results, aes(x = reorder(Grupo, I_MPCS), y = I_MPCS, fill = Tipo_Nudge)) +
@@ -777,46 +849,51 @@ server <- function(input, output, session) {
       }
     }
     
-    # Trayectorias de Markov
+    # --- Trayectorias de Markov ---
     p_markov <- function() {
       if (!is.null(r$sim_base) && nrow(r$sim_base) > 0) {
+        # Determinar etiqueta segun dominio
+        y_label <- if (dominio == "educacion" || any(grepl("Participacion", colnames(r$sim_base)))) {
+          "Probabilidad de participacion"
+        } else {
+          "Probabilidad de ocupacion"
+        }
         return(graficar_trayectorias_markov(
           r$sim_base, 
           r$sim_nudge, 
           estados = colnames(r$sim_base),
           titulo = paste("Trayectorias de Markov -", first_group),
-          y_label = "Probabilidad de ocupacion"
+          y_label = y_label
         ))
       }
       return(ggplot() + theme_void() + 
                annotate("text", x = 0.5, y = 0.5, label = "No hay datos para trayectorias"))
     }
     
-# --- Arbol de Markov (CON NUEVA VERSION ULTRA CLARA) ---
-p_arbol <- function() {
-  if (!is.null(r$markov_mat)) {
-    # Obtener estados correctamente
-    if (!is.null(r$estados) && length(r$estados) == ncol(r$markov_mat)) {
-      estados_arbol <- r$estados
-    } else if (!is.null(colnames(r$markov_mat))) {
-      estados_arbol <- colnames(r$markov_mat)
-    } else {
-      estados_arbol <- paste0("Estado ", 1:ncol(r$markov_mat))
+    # --- Arbol de Markov (CON NUEVA VERSION SIMPLE) ---
+    p_arbol <- function() {
+      if (!is.null(r$markov_mat)) {
+        # Obtener estados en el orden correcto
+        if (!is.null(r$estados) && length(r$estados) == ncol(r$markov_mat)) {
+          estados_arbol <- r$estados
+        } else if (!is.null(colnames(r$markov_mat))) {
+          estados_arbol <- colnames(r$markov_mat)
+        } else {
+          estados_arbol <- paste0("E", 1:ncol(r$markov_mat))
+        }
+        
+        return(graficar_arbol_markov(
+          P = r$markov_mat,
+          estados = estados_arbol,
+          umbral_prob = 0.05,
+          titulo = paste("Transiciones de Markov -", first_group)
+        ))
+      }
+      return(ggplot() + theme_void() + 
+               annotate("text", x = 0.5, y = 0.5, label = "No hay datos para arbol de Markov"))
     }
     
-    return(graficar_arbol_markov(
-      P = r$markov_mat,
-      estados = estados_arbol,
-      umbral_prob = 0.05,
-      titulo = paste("Arbol de Transicion -", first_group)
-    ))
-  }
-  return(ggplot() + theme_void() + 
-           annotate("text", x = 0.5, y = 0.5, 
-                    label = "No hay datos para arbol de Markov",
-                    size = 6, color = "#7F8C8D", fontface = "bold"))
-}
-    
+    # --- Juego evolutivo ---
     p_juego <- function() {
       if (!is.null(r$alpha)) {
         return(graficar_juego_evolutivo(
@@ -1042,7 +1119,9 @@ p_arbol <- function() {
       "<p><b>Resumen de resultados</b></p>",
       "<p>Se analizaron <b>", nrow(rv$results_df), " grupos</b> con un total de <b>", 
       sum(rv$results_df$n), " observaciones</b>.</p>",
-      "<p><b>Dominio:</b> Salud - Adherencia a medicamentos</p>",
+      "<p><b>Dominio:</b> ",
+      ifelse(any(grepl("Participacion", names(rv$data))), "Educacion - Participacion en el aula", "Salud - Adherencia a medicamentos"),
+      "</p>",
       "<hr>",
       "<p><b>Grupo con mayor prioridad:</b> <span style='color:#C0392B;font-weight:bold;'>", 
       top_group$Grupo, "</span> (I_MPCS = ", round(top_group$I_MPCS, 4), ")</p>",
@@ -1109,7 +1188,9 @@ p_arbol <- function() {
         "<h1>Reporte del MPCS</h1>",
         "<p><b>Fecha de generacion:</b> ", format(Sys.Date(), "%d de %B de %Y"), 
         " a las ", format(Sys.time(), "%H:%M"), "</p>",
-        "<p><b>Dominio:</b> Salud - Adherencia a medicamentos</p>",
+        "<p><b>Dominio:</b> ",
+        ifelse(any(grepl("Participacion", names(rv$data))), "Educacion - Participacion en el aula", "Salud - Adherencia a medicamentos"),
+        "</p>",
         "<hr>",
         "<h2>1. Resumen de resultados</h2>",
         "<p><b>Grupos analizados:</b> ", nrow(rv$results_df), "</p>",
