@@ -144,7 +144,7 @@ ui <- page_navbar(
             div(style = "padding: 10px; background-color: #f8f9fa; border-radius: 5px; margin-top: 10px;",
                 h5("Bootstrap Results"),
                 uiOutput("bootstrap_results_ui"),
-                plotOutput("bootstrap_plot", height = "200px")
+                plotOutput("bootstrap_plot", height = "250px"
             )
           ),
           div(
