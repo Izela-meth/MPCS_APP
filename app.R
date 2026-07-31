@@ -707,47 +707,67 @@ server <- function(input, output, session) {
     showNotification("Bootstrap completed successfully!", type = "message")
   })
   
-  # Salida de bootstrap en HTML
-  output$bootstrap_results_ui <- renderUI({
-    req(rv$bootstrap_resultado)
-    
-    res <- rv$bootstrap_resultado
-    
-    jaccard_optimo <- res$resultados$Jaccard_Promedio[which(res$resultados$Umbral == res$umbral_optimo)[1]]
-    if (length(jaccard_optimo) == 0) jaccard_optimo <- NA
-    
-    HTML(paste0(
-      "<div style='background-color: #f0f8ff; padding: 12px; border-radius: 5px; border-left: 4px solid #3498DB;'>",
-      "<b>Optimal threshold:</b> <span style='color:#C0392B;font-size:20px;font-weight:bold;'>", 
-      round(res$umbral_optimo, 2), "</span><br>",
-      "<b>Original node:</b> ", res$nodo_original, "<br>",
-      "<b>Most frequent node (bootstrap):</b> ", res$nodo_mas_frecuente, 
-      " (", round(res$pct_nodo_mas_frecuente, 1), "% stability)<br>",
-      if (!is.na(jaccard_optimo)) paste0("<b>Jaccard similarity:</b> ", round(jaccard_optimo, 3)) else "",
-      "</div>"
-    ))
-  })
+ # ==========================================================================
+# [CORREGIDO] SALIDA DE BOOTSTRAP - MANEJO DE ERRORES
+# ==========================================================================
+output$bootstrap_results_ui <- renderUI({
+  req(rv$bootstrap_resultado)
   
-  # Grafico de bootstrap
-  output$bootstrap_plot <- renderPlot({
-    req(rv$bootstrap_resultado)
-    
-    res <- rv$bootstrap_resultado
-    df <- res$resultados
-    
-    ggplot(df, aes(x = Umbral)) +
-      geom_line(aes(y = Jaccard_Promedio, color = "Jaccard"), linewidth = 1.2) +
-      geom_point(aes(y = Jaccard_Promedio, color = "Jaccard"), size = 2) +
-      geom_vline(xintercept = res$umbral_optimo, linetype = "dashed", color = "#C0392B", linewidth = 1) +
-      annotate("text", x = res$umbral_optimo + 0.008, y = max(df$Jaccard_Promedio) * 0.9,
-               label = paste0("Optimal = ", round(res$umbral_optimo, 2)),
-               color = "#C0392B", fontface = "bold", hjust = 0) +
-      scale_y_continuous(labels = scales::percent, limits = c(0, 1)) +
-      labs(title = "Graph stability by threshold (Jaccard)",
-           x = "Correlation threshold", y = "Jaccard similarity") +
-      theme_minimal(base_size = 11) +
-      theme(legend.position = "bottom")
-  })
+  res <- rv$bootstrap_resultado
+  
+  # --- Verificar que los datos existen y son válidos ---
+  if (is.null(res$umbral_optimo) || is.na(res$umbral_optimo)) {
+    return(div(
+      class = "alert alert-warning",
+      icon("exclamation-triangle"),
+      " No se pudo determinar un umbral óptimo. Intenta con más réplicas o un rango diferente."
+    ))
+  }
+  
+  # --- Extraer valores de forma segura ---
+  umbral_optimo <- round(res$umbral_optimo, 2)
+  
+  nodo_original <- res$nodo_original
+  if (is.null(nodo_original) || is.na(nodo_original)) nodo_original <- "No disponible"
+  
+  nodo_mas_frecuente <- res$nodo_mas_frecuente
+  if (is.null(nodo_mas_frecuente) || is.na(nodo_mas_frecuente)) nodo_mas_frecuente <- "No disponible"
+  
+  pct_estable <- res$pct_nodo_mas_frecuente
+  if (is.null(pct_estable) || is.na(pct_estable) || !is.numeric(pct_estable)) {
+    pct_estable <- 0
+  }
+  pct_estable <- round(pct_estable, 1)
+  
+  # --- Encontrar Jaccard para el umbral óptimo ---
+  jaccard_optimo <- NA
+  if (!is.null(res$resultados) && nrow(res$resultados) > 0) {
+    idx <- which(res$resultados$Umbral == res$umbral_optimo)
+    if (length(idx) > 0 && !is.na(res$resultados$Jaccard_Promedio[idx[1]])) {
+      jaccard_optimo <- round(res$resultados$Jaccard_Promedio[idx[1]], 3)
+    }
+  }
+  
+  # --- Construir HTML de resultados ---
+  html_parts <- c(
+    "<div style='background-color: #f0f8ff; padding: 12px; border-radius: 5px; border-left: 4px solid #3498DB;'>",
+    "<b>Optimal threshold:</b> <span style='color:#C0392B;font-size:20px;font-weight:bold;'>", 
+    umbral_optimo, "</span><br>",
+    "<b>Original node:</b> ", nodo_original, "<br>",
+    "<b>Most frequent node (bootstrap):</b> ", nodo_mas_frecuente, 
+    " (", pct_estable, "% stability)<br>"
+  )
+  
+  if (!is.na(jaccard_optimo)) {
+    html_parts <- c(html_parts, "<b>Jaccard similarity:</b> ", jaccard_optimo)
+  } else {
+    html_parts <- c(html_parts, "<b>Jaccard similarity:</b> No disponible")
+  }
+  
+  html_parts <- c(html_parts, "</div>")
+  
+  HTML(paste(html_parts, collapse = ""))
+})
   
   # ==========================================================================
   # EJECUTAR MPCS
