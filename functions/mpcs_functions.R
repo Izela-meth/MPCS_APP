@@ -175,7 +175,6 @@ calcular_markov <- function(estados, orden_estados = NULL,
   # --- Determinar estados únicos ---
   estados_unicos <- unique(estados_clean)
   
-  # Si no se especifica orden, intentar ordenar automáticamente
   if (is.null(orden_estados)) {
     if (all(grepl("^E[0-9]+$", estados_unicos))) {
       orden_estados <- estados_unicos[order(as.numeric(gsub("E", "", estados_unicos)))]
@@ -228,38 +227,56 @@ calcular_markov <- function(estados, orden_estados = NULL,
     for (i in 1:(m-1)) {
       t <- tasas_avance[i]
       
-      # Inercia: 0.50 - 0.15 * (i/m) (se reduce con el avance)
+      # Asegurar que t esté en [0,1]
+      t <- max(0, min(1, t))
+      
+      # Inercia base: se reduce con el avance
       inercia <- 0.50 - 0.15 * (i/m)
-      
-      # Retroceso: 0.05 * (1 - i/m) (se reduce con el avance)
-      retroceso <- 0.05 * (1 - i/m)
-      
-      # Asegurar que no sean negativos
       inercia <- max(0.10, min(0.80, inercia))
+      
+      # Retroceso base: se reduce con el avance
+      retroceso <- 0.05 * (1 - i/m)
       retroceso <- max(0.01, min(0.20, retroceso))
       
-      # Ajustar para que la fila sume 1
-      suma <- t + inercia + retroceso
-      if (suma > 1) {
-        # Escalar proporcionalmente
-        t <- t / suma
-        inercia <- inercia / suma
-        retroceso <- retroceso / suma
-      } else {
-        # Distribuir el resto en otros estados
-        resto <- 1 - t - inercia - retroceso
-        if (resto > 0) {
-          otros <- setdiff(1:m, c(i, i+1, if (i > 1) i-1 else NULL))
-          if (length(otros) > 0) {
-            P[i, otros] <- resto / length(otros)
-          }
-        }
+      # ============================================================
+      # [CORREGIDO] La tasa de avance se respeta EXACTAMENTE
+      # Solo se ajustan inercia y retroceso para que quepan en 1 - t
+      # ============================================================
+      resto <- 1 - t
+      
+      # Escalar inercia para que quepa en el remanente
+      if (inercia > resto) {
+        inercia <- resto * 0.85  # deja 15% para retroceso
       }
       
+      # Escalar retroceso para que quepa en el remanente
+      if (retroceso > (resto - inercia)) {
+        retroceso <- resto - inercia
+      }
+      retroceso <- max(0, retroceso)
+      
+      # Si sobra espacio, distribuir en inercia y retroceso proporcionalmente
+      sobrante <- resto - inercia - retroceso
+      if (sobrante > 0.001) {
+        inercia <- inercia + sobrante * 0.7
+        retroceso <- retroceso + sobrante * 0.3
+      }
+      
+      # Asignar a la matriz
       P[i, i] <- inercia
       P[i, i+1] <- t
+      
       if (i > 1) {
         P[i, i-1] <- retroceso
+      }
+      
+      # Distribuir el resto en otros estados (si existe)
+      resto_final <- 1 - sum(P[i, ])
+      if (resto_final > 0.001) {
+        otros <- setdiff(1:m, c(i, i+1, if (i > 1) i-1 else NULL))
+        if (length(otros) > 0) {
+          P[i, otros] <- resto_final / length(otros)
+        }
       }
     }
     
@@ -587,24 +604,21 @@ generar_datos_aula <- function(n = 200, seed = 456) {
 #' @return objeto ggplot
 #' @export
 graficar_arbol_markov <- function(P, estados = NULL, umbral_prob = 0.05, 
-                                  titulo = "Transiciones de Markov") {
+                                  titulo = "Markov Transitions") {
   
-  # --- Verificar paquetes ---
   if (!requireNamespace("ggplot2", quietly = TRUE)) {
     stop("Se requiere el paquete ggplot2")
   }
   
-  # --- Validar entrada ---
   if (is.null(P) || nrow(P) < 2) {
     return(ggplot2::ggplot() + ggplot2::theme_void() + 
              ggplot2::annotate("text", x = 0.5, y = 0.5, 
-                              label = "No hay datos para el arbol de Markov",
+                              label = "No data for Markov tree",
                               size = 6, color = "#7F8C8D", fontface = "bold"))
   }
   
   m <- nrow(P)
   
-  # --- Obtener nombres de estados ---
   if (!is.null(estados) && length(estados) == m) {
     estados_nombres <- estados
   } else if (!is.null(colnames(P)) && all(colnames(P) != "")) {
@@ -613,9 +627,6 @@ graficar_arbol_markov <- function(P, estados = NULL, umbral_prob = 0.05,
     estados_nombres <- paste0("E", 1:m)
   }
   
-  # --- Crear datos para el grafico ---
-  
-  # 1. Estados (nodos) - posicion horizontal
   nodos <- data.frame(
     id = 1:m,
     nombre = estados_nombres,
@@ -623,30 +634,17 @@ graficar_arbol_markov <- function(P, estados = NULL, umbral_prob = 0.05,
     y = 0
   )
   
-  # 2. Transiciones (flechas) - solo las mas importantes
   transiciones <- data.frame()
   for (i in 1:m) {
     for (j in 1:m) {
       if (P[i, j] >= umbral_prob && i != j) {
-        # Calcular posicion de la flecha (ligeramente arriba o abajo)
-        offset_y <- 0
-        if (j > i) {
-          # Avance: flecha hacia la derecha (ligeramente arriba)
-          offset_y <- 0.15
-        } else {
-          # Retroceso: flecha hacia la izquierda (ligeramente abajo)
-          offset_y <- -0.15
-        }
-        
+        offset_y <- if (j > i) 0.15 else -0.15
         transiciones <- rbind(transiciones, data.frame(
-          from = i,
-          to = j,
-          from_x = i,
-          to_x = j,
-          from_y = offset_y,
-          to_y = offset_y,
+          from = i, to = j,
+          from_x = i, to_x = j,
+          from_y = offset_y, to_y = offset_y,
           prob = round(P[i, j] * 100, 1),
-          tipo = if (j > i) "Avance" else "Retroceso",
+          tipo = if (j > i) "Advance" else "Regression",
           color = if (j > i) "#2E86AB" else "#E84855"
         ))
       }
@@ -656,14 +654,11 @@ graficar_arbol_markov <- function(P, estados = NULL, umbral_prob = 0.05,
   if (nrow(transiciones) == 0) {
     return(ggplot2::ggplot() + ggplot2::theme_void() + 
              ggplot2::annotate("text", x = 0.5, y = 0.5, 
-                              label = paste0("No hay transiciones >= ", round(umbral_prob*100, 1), "%"),
+                              label = paste0("No transitions >= ", round(umbral_prob*100, 1), "%"),
                               size = 6, color = "#7F8C8D", fontface = "bold"))
   }
   
-  # --- Crear grafico ---
   p <- ggplot2::ggplot() +
-    
-    # --- Lineas de transicion (flechas) ---
     ggplot2::geom_segment(
       data = transiciones,
       aes(x = from_x, xend = to_x, 
@@ -673,69 +668,38 @@ graficar_arbol_markov <- function(P, estados = NULL, umbral_prob = 0.05,
       arrow = arrow(length = unit(0.25, "cm"), type = "closed"),
       alpha = 0.8
     ) +
-    
-    # --- Grosor de lineas proporcional a probabilidad ---
-    ggplot2::scale_linewidth_continuous(
-      range = c(0.5, 2.5),
-      guide = "none"
-    ) +
-    
-    # --- Colores ---
+    ggplot2::scale_linewidth_continuous(range = c(0.5, 2.5), guide = "none") +
     ggplot2::scale_color_manual(
-      values = c("Avance" = "#2E86AB", "Retroceso" = "#E84855"),
-      name = "Tipo",
-      labels = c("Avance" = "Avance \u2192", "Retroceso" = "Retroceso \u2190")
+      values = c("Advance" = "#2E86AB", "Regression" = "#E84855"),
+      name = "Type",
+      labels = c("Advance" = "Advance \u2192", "Regression" = "Regression \u2190")
     ) +
-    
-    # --- Etiquetas de probabilidad (con fondo blanco) ---
     ggplot2::geom_label(
       data = transiciones,
       aes(x = (from_x + to_x) / 2, 
           y = (from_y + to_y) / 2 + 0.12,
           label = paste0(prob, "%")),
-      size = 4.5,
-      fontface = "bold",
-      fill = "white",
-      color = "#1A3A5C",
-      label.size = 0.3,
-      label.padding = unit(0.2, "lines"),
-      alpha = 0.95,
+      size = 4.5, fontface = "bold", fill = "white",
+      color = "#1A3A5C", label.size = 0.3,
+      label.padding = unit(0.2, "lines"), alpha = 0.95,
       show.legend = FALSE
     ) +
-    
-    # --- Nodos (estados) ---
     ggplot2::geom_point(
-      data = nodos,
-      aes(x = x, y = y),
-      size = 22,
-      color = "#2C3E50",
-      fill = "#F8F9F9",
-      shape = 21,
-      stroke = 2
+      data = nodos, aes(x = x, y = y),
+      size = 22, color = "#2C3E50", fill = "#F8F9F9",
+      shape = 21, stroke = 2
     ) +
-    
-    # --- Etiquetas de nodos ---
     ggplot2::geom_text(
-      data = nodos,
-      aes(x = x, y = y, label = nombre),
-      size = 4,
-      fontface = "bold",
-      color = "#1A3A5C"
+      data = nodos, aes(x = x, y = y, label = nombre),
+      size = 4, fontface = "bold", color = "#1A3A5C"
     ) +
-    
-    # --- Ajustes de ejes ---
-    ggplot2::xlim(0.5, m + 0.5) +
-    ggplot2::ylim(-0.6, 0.6) +
-    
-    # --- TITULOS ---
+    ggplot2::xlim(0.5, m + 0.5) + ggplot2::ylim(-0.6, 0.6) +
     ggplot2::labs(
       title = titulo,
-      subtitle = paste0("Solo transiciones con probabilidad >= ", round(umbral_prob * 100, 1), "%"),
+      subtitle = paste0("Only transitions >= ", round(umbral_prob * 100, 1), "%"),
       x = "", y = "",
       color = ""
     ) +
-    
-    # --- TEMA ---
     ggplot2::theme_minimal(base_size = 13) +
     ggplot2::theme(
       axis.text = element_blank(),
@@ -752,6 +716,7 @@ graficar_arbol_markov <- function(P, estados = NULL, umbral_prob = 0.05,
   
   return(p)
 }
+
 # ============================================================================
 # 9. graficar_juego_evolutivo — Dinamica replicadora (teoria de juegos)
 # ============================================================================
@@ -764,7 +729,7 @@ graficar_arbol_markov <- function(P, estados = NULL, umbral_prob = 0.05,
 #' @return objeto ggplot
 #' @export
 graficar_juego_evolutivo <- function(alpha = 0.60, p_star = NULL, 
-                                     titulo = "Dinamica Replicadora") {
+                                     titulo = "Replicator Dynamics") {
   
   if (!requireNamespace("ggplot2", quietly = TRUE)) {
     stop("Se requiere el paquete ggplot2")
@@ -799,8 +764,8 @@ graficar_juego_evolutivo <- function(alpha = 0.60, p_star = NULL,
   df <- data.frame(p = p, f_A = f_A, f_R = f_R, dp_dt = dp_dt)
   
   p1 <- ggplot(df, aes(x = p)) +
-    geom_line(aes(y = f_A, color = "Adoptantes (A)"), linewidth = 1.2) +
-    geom_line(aes(y = f_R, color = "Resistentes (R)"), linewidth = 1.2) +
+    geom_line(aes(y = f_A, color = "Adopters (A)"), linewidth = 1.2) +
+    geom_line(aes(y = f_R, color = "Resisters (R)"), linewidth = 1.2) +
     geom_vline(xintercept = p_star, linetype = "dashed", color = "#C0392B", linewidth = 1) +
     geom_hline(yintercept = 0, linetype = "dotted", color = "#7F8C8D", linewidth = 0.5) +
     annotate("text", x = min(p_star + 0.05, 0.95), y = max(df$f_A) * 0.85,
@@ -811,21 +776,21 @@ graficar_juego_evolutivo <- function(alpha = 0.60, p_star = NULL,
     annotate("rect", xmin = p_star, xmax = 1, ymin = -Inf, ymax = Inf,
              alpha = 0.08, fill = "#2ECC71") +
     annotate("text", x = p_star / 2, y = max(df$f_A) * 0.95,
-             label = "Inestable", color = "#C0392B", size = 3.5, hjust = 0.5) +
+             label = "Unstable", color = "#C0392B", size = 3.5, hjust = 0.5) +
     annotate("text", x = (1 + p_star) / 2, y = max(df$f_A) * 0.95,
-             label = "Estable", color = "#27AE60", size = 3.5, hjust = 0.5) +
+             label = "Stable", color = "#27AE60", size = 3.5, hjust = 0.5) +
     scale_x_continuous(labels = scales::percent, limits = c(0, 1)) +
     scale_y_continuous(labels = scales::number) +
     scale_color_manual(
-      name = "Estrategia",
-      values = c("Adoptantes (A)" = "#2E86AB", "Resistentes (R)" = "#E84855")
+      name = "Strategy",
+      values = c("Adopters (A)" = "#2E86AB", "Resisters (R)" = "#E84855")
     ) +
     labs(
       title = titulo,
-      subtitle = paste0("α = ", round(alpha, 3), " | Masa critica (p*) = ", round(p_star, 3)),
-      x = "Proporcion de adoptantes (p)",
-      y = "Pago esperado",
-      color = "Estrategia"
+      subtitle = paste0("α = ", round(alpha, 3), " | Critical mass (p*) = ", round(p_star, 3)),
+      x = "Proportion of adopters (p)",
+      y = "Expected payoff",
+      color = "Strategy"
     ) +
     theme_minimal(base_size = 11) +
     theme(
@@ -846,10 +811,10 @@ graficar_juego_evolutivo <- function(alpha = 0.60, p_star = NULL,
     scale_y_continuous(labels = scales::number) +
     scale_fill_manual(values = c("#E74C3C", "#2ECC71"), guide = "none") +
     labs(
-      title = "Dinamica Replicadora (dp/dt)",
-      subtitle = "Velocidad de cambio en la proporcion de adoptantes",
-      x = "Proporcion de adoptantes (p)",
-      y = "dp/dt (tasa de cambio)"
+      title = "Replicator Dynamics (dp/dt)",
+      subtitle = "Rate of change in the proportion of adopters",
+      x = "Proportion of adopters (p)",
+      y = "dp/dt (rate of change)"
     ) +
     theme_minimal(base_size = 11) +
     theme(
@@ -859,7 +824,7 @@ graficar_juego_evolutivo <- function(alpha = 0.60, p_star = NULL,
   
   p_combinado <- p1 + p2 + 
     patchwork::plot_annotation(
-      title = paste0("Analisis de Teoria de Juegos - MPCS"),
+      title = paste0("Game Theory Analysis - MPCS"),
       subtitle = paste0("α = ", round(alpha, 3), " | p* = ", round(p_star, 3)),
       theme = theme(
         plot.title = element_text(face = "bold", size = 14, hjust = 0.5),
@@ -885,8 +850,8 @@ graficar_juego_evolutivo <- function(alpha = 0.60, p_star = NULL,
 #' @export
 graficar_trayectorias_markov <- function(sim_base, sim_nudge = NULL, 
                                          estados = NULL, 
-                                         titulo = "Trayectorias de Markov",
-                                         y_label = "Probabilidad de ocupacion") {
+                                         titulo = "Markov Trajectories",
+                                         y_label = "Occupation probability") {
   
   if (!requireNamespace("ggplot2", quietly = TRUE)) {
     stop("Se requiere el paquete ggplot2")
@@ -901,7 +866,7 @@ graficar_trayectorias_markov <- function(sim_base, sim_nudge = NULL,
   if (is.null(sim_base)) {
     return(ggplot() + theme_void() + 
              annotate("text", x = 0.5, y = 0.5, 
-                     label = "No hay datos para trayectorias",
+                     label = "No data for trajectories",
                      size = 5, color = "#7F8C8D"))
   }
   
@@ -915,14 +880,14 @@ graficar_trayectorias_markov <- function(sim_base, sim_nudge = NULL,
   df_base <- as.data.frame(sim_base)
   colnames(df_base) <- estados
   df_base$Periodo <- 0:(nrow(df_base) - 1)
-  df_base$Escenario <- "Sin nudge"
+  df_base$Escenario <- "Without nudge"
   
   if (!is.null(sim_nudge) && nrow(sim_nudge) == nrow(sim_base)) {
     df_nudge <- as.data.frame(sim_nudge)
     if (ncol(df_nudge) == length(estados)) {
       colnames(df_nudge) <- estados
       df_nudge$Periodo <- 0:(nrow(df_nudge) - 1)
-      df_nudge$Escenario <- "Con nudge"
+      df_nudge$Escenario <- "With nudge"
       df_combined <- rbind(df_base, df_nudge)
     } else {
       df_combined <- df_base
@@ -956,14 +921,14 @@ graficar_trayectorias_markov <- function(sim_base, sim_nudge = NULL,
       breaks = seq(0, max(df_long$Periodo), by = max(1, round(max(df_long$Periodo)/6)))
     ) +
     scale_color_manual(values = colores) +
-    scale_linetype_manual(values = c("Sin nudge" = "solid", "Con nudge" = "dashed")) +
+    scale_linetype_manual(values = c("Without nudge" = "solid", "With nudge" = "dashed")) +
     labs(
       title = titulo,
-      subtitle = "Muestra la proporcion esperada de individuos en cada estado a lo largo del tiempo",
-      x = "Periodo (unidades de tiempo)",
+      subtitle = "Expected proportion of individuals in each state over time",
+      x = "Period (time units)",
       y = y_label,
-      color = "Estado conductual",
-      linetype = "Escenario"
+      color = "Behavioral state",
+      linetype = "Scenario"
     ) +
     theme_minimal(base_size = 13) +
     theme(
@@ -1017,9 +982,9 @@ format_report <- function(results, plots = NULL) {
     dplyr::mutate(
       Prioridad = 1:n(),
       Nivel = dplyr::case_when(
-        I_MPCS >= 0.75 ~ "Alta",
-        I_MPCS >= 0.50 ~ "Media",
-        TRUE ~ "Baja"
+        I_MPCS >= 0.75 ~ "High",
+        I_MPCS >= 0.50 ~ "Medium",
+        TRUE ~ "Low"
       )
     )
   
@@ -1360,27 +1325,22 @@ seleccionar_umbral_bootstrap <- function(datos, variables,
   
   for (umbral in umbrales) {
     
-    # --- 1. Grafo con datos originales ---
     res_original <- calcular_grafo(datos, variables, umbral = umbral)
     nodo_original <- res_original$optimal_node
     if (is.na(nodo_original) || is.null(nodo_original)) nodo_original <- "Sin_nodo"
     
-    # --- 2. Bootstrap ---
     nodos_boot <- character()
     aristas_boot <- list()
     
     for (b in 1:n_boot) {
-      # Remuestrear filas con reemplazo
       idx_boot <- sample(1:n, size = n, replace = TRUE)
       datos_boot <- datos[idx_boot, , drop = FALSE]
       
-      # Construir grafo con el umbral actual
       res_boot <- calcular_grafo(datos_boot, variables, umbral = umbral)
       nodo_boot <- res_boot$optimal_node
       if (is.na(nodo_boot) || is.null(nodo_boot)) nodo_boot <- "Sin_nodo"
       nodos_boot <- c(nodos_boot, nodo_boot)
       
-      # Guardar aristas si hay grafo
       if (!is.null(res_boot$graph)) {
         aristas_boot[[b]] <- igraph::as_edgelist(res_boot$graph)
       } else {
@@ -1388,20 +1348,17 @@ seleccionar_umbral_bootstrap <- function(datos, variables,
       }
     }
     
-    # --- 3. Calcular Jaccard para aristas ---
     jaccards <- numeric()
     for (b in 1:(n_boot - 1)) {
       for (c in (b + 1):n_boot) {
         E_b <- aristas_boot[[b]]
         E_c <- aristas_boot[[c]]
         
-        # Si ambos están vacíos, Jaccard = 1
         if (nrow(E_b) == 0 && nrow(E_c) == 0) {
           jaccard <- 1
         } else if (nrow(E_b) == 0 || nrow(E_c) == 0) {
           jaccard <- 0
         } else {
-          # Convertir a conjuntos de strings para comparar
           set_b <- apply(E_b, 1, function(x) paste(sort(x), collapse = "_"))
           set_c <- apply(E_c, 1, function(x) paste(sort(x), collapse = "_"))
           
@@ -1415,12 +1372,10 @@ seleccionar_umbral_bootstrap <- function(datos, variables,
     
     jaccard_promedio <- mean(jaccards, na.rm = TRUE)
     
-    # --- 4. Estabilidad del nodo óptimo ---
     freq_nodos <- table(nodos_boot)
     nodo_mas_frecuente <- names(freq_nodos)[which.max(freq_nodos)]
     pct_nodo_mas_frecuente <- max(freq_nodos) / n_boot * 100
     
-    # --- 5. Guardar resultados ---
     resultados <- rbind(resultados, data.frame(
       Umbral = umbral,
       Nodo_Original = nodo_original,
@@ -1431,16 +1386,12 @@ seleccionar_umbral_bootstrap <- function(datos, variables,
     ))
   }
   
-  # --- 6. Seleccionar umbral óptimo ---
-  # Priorizar: Jaccard > criterio, luego mayor estabilidad del nodo
   resultados_filtrados <- resultados[resultados$Cumple_Criterio, ]
   
   if (nrow(resultados_filtrados) > 0) {
-    # Seleccionar el que maximiza Jaccard + estabilidad
     idx_optimo <- which.max(resultados_filtrados$Jaccard_Promedio + resultados_filtrados$Pct_Nodo_Estable / 100)
     umbral_optimo <- resultados_filtrados$Umbral[idx_optimo]
   } else {
-    # Si ninguno cumple, seleccionar el de mayor Jaccard
     idx_optimo <- which.max(resultados$Jaccard_Promedio)
     umbral_optimo <- resultados$Umbral[idx_optimo]
     warning("Ningún umbral cumple con el criterio de estabilidad. Seleccionado el de mayor Jaccard.")
@@ -1454,7 +1405,8 @@ seleccionar_umbral_bootstrap <- function(datos, variables,
     nodo_original = resultados$Nodo_Original[which(resultados$Umbral == umbral_optimo)[1]],
     nodo_mas_frecuente = resultados$Nodo_Mas_Frecuente[which(resultados$Umbral == umbral_optimo)[1]]
   ))
-}   
+}
+
 # ============================================================================
 # FIN DEL ARCHIVO
 # ============================================================================
