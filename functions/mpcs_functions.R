@@ -129,20 +129,24 @@ calcular_grafo <- function(datos, variables, umbral = 0.10) {
 }
 
 # ============================================================================
-# 2. calcular_markov — Estima cadena de Markov (OPCION B: HORIZONTE FIJO H=10)
+# 2. calcular_markov — Estima cadena de Markov (OPCIÓN B: HORIZONTE FIJO H=10)
 # ============================================================================
 
-#' Calcular cadena de Markov y convergencia (Opcion B)
+#' Calcular cadena de Markov y convergencia (Opción B)
 #'
 #' @param estados vector con los estados de cada individuo
 #' @param orden_estados vector con el orden progresivo de estados (opcional)
-#' @param umbral_objetivo proporcion para considerar convergencia (defecto: 0.50)
-#' @param horizonte numero de periodos para proyectar (defecto: 10)
-#' @return lista con matriz P, simulacion, indice de Markov y tiempo de referencia
+#' @param tasas_avance vector numérico de longitud m-1 con probabilidades de transición hacia adelante.
+#'        Si es NULL, usa heurística genérica. Si se provee, construye la matriz con esas tasas.
+#' @param umbral_objetivo proporción para considerar convergencia (defecto: 0.50)
+#' @param horizonte número de períodos para proyectar (defecto: 10)
+#' @return lista con matriz P, simulación, índice de Markov y tiempo de referencia
 #' @export
 calcular_markov <- function(estados, orden_estados = NULL, 
+                            tasas_avance = NULL,
                             umbral_objetivo = 0.50, horizonte = 10) {
   
+  # --- Validaciones ---
   if (missing(estados)) {
     warning("Se requiere el vector de estados")
     return(list(
@@ -154,6 +158,7 @@ calcular_markov <- function(estados, orden_estados = NULL,
     ))
   }
   
+  # Limpiar datos
   estados_clean <- estados[!is.na(estados) & estados != ""]
   
   if (length(estados_clean) < 30) {
@@ -167,8 +172,10 @@ calcular_markov <- function(estados, orden_estados = NULL,
     ))
   }
   
+  # --- Determinar estados únicos ---
   estados_unicos <- unique(estados_clean)
   
+  # Si no se especifica orden, intentar ordenar automáticamente
   if (is.null(orden_estados)) {
     if (all(grepl("^E[0-9]+$", estados_unicos))) {
       orden_estados <- estados_unicos[order(as.numeric(gsub("E", "", estados_unicos)))]
@@ -196,6 +203,7 @@ calcular_markov <- function(estados, orden_estados = NULL,
     ))
   }
   
+  # --- Calcular distribución actual ---
   freq <- table(estados_clean)
   dist_actual <- rep(0, m)
   names(dist_actual) <- orden_estados
@@ -206,36 +214,93 @@ calcular_markov <- function(estados, orden_estados = NULL,
     }
   }
   
+  # --- Construir matriz de transición ---
   P <- matrix(0, nrow = m, ncol = m)
   colnames(P) <- orden_estados
   rownames(P) <- orden_estados
   
-  for (i in 1:(m-1)) {
-    prob_avance <- 0.30 + 0.20 * (1 - i/m)
-    prob_quedarse <- 0.50 - 0.15 * (i/m)
-    prob_retroceso <- 0.10 * (1 - i/m)
+  # ============================================================
+  # [NUEVO] Si se proveen tasas_avance, usarlas para construir la matriz
+  # ============================================================
+  if (!is.null(tasas_avance) && length(tasas_avance) == (m - 1)) {
     
-    P[i, i] <- prob_quedarse
-    P[i, i+1] <- prob_avance
-    
-    if (i > 1) {
-      P[i, i-1] <- prob_retroceso
-    }
-    
-    resto <- 1 - sum(P[i, ])
-    if (resto > 0) {
-      otros <- setdiff(1:m, c(i, i+1, if (i > 1) i-1 else NULL))
-      if (length(otros) > 0) {
-        P[i, otros] <- resto / length(otros)
+    # --- Construcción con tasas_avance definidas por el usuario ---
+    for (i in 1:(m-1)) {
+      t <- tasas_avance[i]
+      
+      # Inercia: 0.50 - 0.15 * (i/m) (se reduce con el avance)
+      inercia <- 0.50 - 0.15 * (i/m)
+      
+      # Retroceso: 0.05 * (1 - i/m) (se reduce con el avance)
+      retroceso <- 0.05 * (1 - i/m)
+      
+      # Asegurar que no sean negativos
+      inercia <- max(0.10, min(0.80, inercia))
+      retroceso <- max(0.01, min(0.20, retroceso))
+      
+      # Ajustar para que la fila sume 1
+      suma <- t + inercia + retroceso
+      if (suma > 1) {
+        # Escalar proporcionalmente
+        t <- t / suma
+        inercia <- inercia / suma
+        retroceso <- retroceso / suma
+      } else {
+        # Distribuir el resto en otros estados
+        resto <- 1 - t - inercia - retroceso
+        if (resto > 0) {
+          otros <- setdiff(1:m, c(i, i+1, if (i > 1) i-1 else NULL))
+          if (length(otros) > 0) {
+            P[i, otros] <- resto / length(otros)
+          }
+        }
+      }
+      
+      P[i, i] <- inercia
+      P[i, i+1] <- t
+      if (i > 1) {
+        P[i, i-1] <- retroceso
       }
     }
+    
+    # Último estado: alta permanencia
+    P[m, m] <- 0.85
+    P[m, 1:(m-1)] <- (1 - 0.85) / (m - 1)
+    
+  } else {
+    
+    # ============================================================
+    # [FALLBACK] Heurística genérica (cuando no se proveen tasas)
+    # ============================================================
+    for (i in 1:(m-1)) {
+      prob_avance <- 0.30 + 0.20 * (1 - i/m)
+      prob_quedarse <- 0.50 - 0.15 * (i/m)
+      prob_retroceso <- 0.10 * (1 - i/m)
+      
+      P[i, i] <- prob_quedarse
+      P[i, i+1] <- prob_avance
+      
+      if (i > 1) {
+        P[i, i-1] <- prob_retroceso
+      }
+      
+      resto <- 1 - sum(P[i, ])
+      if (resto > 0) {
+        otros <- setdiff(1:m, c(i, i+1, if (i > 1) i-1 else NULL))
+        if (length(otros) > 0) {
+          P[i, otros] <- resto / length(otros)
+        }
+      }
+    }
+    
+    P[m, m] <- 0.85
+    P[m, 1:(m-1)] <- (1 - 0.85) / (m - 1)
   }
   
-  P[m, m] <- 0.85
-  P[m, 1:(m-1)] <- (1 - 0.85) / (m - 1)
-  
+  # --- Normalizar filas para asegurar que suman 1 ---
   P <- P / rowSums(P)
   
+  # --- Simular cadena de Markov ---
   simular <- function(P, v0, n = 30) {
     m <- nrow(P)
     dist <- matrix(0, n + 1, m)
@@ -249,6 +314,9 @@ calcular_markov <- function(estados, orden_estados = NULL,
   
   sim_base <- simular(P, dist_actual)
   
+  # ============================================================
+  # [OPCIÓN B] I_Markov = adherencia en horizonte fijo H
+  # ============================================================
   idx_h <- min(horizonte + 1, nrow(sim_base))
   
   if (m >= 2) {
