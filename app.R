@@ -107,9 +107,7 @@ ui <- page_navbar(
                       min = 0.05, max = 0.30, value = 0.10, step = 0.01,
                       post = tags$span("  (|r| > value)")),
           
-          # ============================================================
           # Campo para tasas de avance de Markov
-          # ============================================================
           hr(),
           h4("Markov transition rates (optional)"),
           helpText("Enter the forward transition probabilities between consecutive states."),
@@ -118,9 +116,7 @@ ui <- page_navbar(
                     placeholder = "e.g., 0.48, 0.89, 0.62"),
           helpText("If left empty, the generic heuristic matrix will be used."),
           
-          # ============================================================
-          # Modulo de Bootstrap para selección de umbral (OPTIMIZADO)
-          # ============================================================
+          # Modulo de Bootstrap para selección de umbral
           hr(),
           h4("Bootstrap threshold selection (optional)"),
           helpText("Evaluates the stability of the optimal node across different correlation thresholds."),
@@ -128,9 +124,9 @@ ui <- page_navbar(
           fluidRow(
             column(6,
               numericInput("boot_n_sim", "Number of bootstrap replicates:",
-                           value = 20,     # <-- DEFAULT 20
-                           min = 10,       # <-- MINIMO 10
-                           max = 50,       # <-- MAXIMO 50
+                           value = 20,
+                           min = 10,
+                           max = 50,
                            step = 5)
             ),
             column(6,
@@ -144,7 +140,7 @@ ui <- page_navbar(
             div(style = "padding: 10px; background-color: #f8f9fa; border-radius: 5px; margin-top: 10px;",
                 h5("Bootstrap Results"),
                 uiOutput("bootstrap_results_ui"),
-                plotOutput("bootstrap_plot", height = "250px"
+                plotOutput("bootstrap_plot", height = "250px")
             )
           ),
           div(
@@ -663,7 +659,7 @@ server <- function(input, output, session) {
   }
   
   # ==========================================================================
-  # [OPTIMIZADO] ANALISIS DE BOOTSTRAP PARA RENDER
+  # ANALISIS DE BOOTSTRAP PARA RENDER
   # ==========================================================================
   observeEvent(input$run_bootstrap, {
     req(rv$data)
@@ -682,12 +678,10 @@ server <- function(input, output, session) {
       variables <- input$graph_vars
       n_boot <- input$boot_n_sim
       
-      # Usar umbrales reducidos para Render (6 valores en lugar de 16)
       umbrales <- c(0.05, 0.07, 0.10, 0.12, 0.15, 0.20)
       
       incProgress(0.2, detail = "Processing thresholds...")
       
-      # --- Ejecutar bootstrap ---
       resultado_boot <- seleccionar_umbral_bootstrap(
         datos = datos,
         variables = variables,
@@ -707,67 +701,100 @@ server <- function(input, output, session) {
     showNotification("Bootstrap completed successfully!", type = "message")
   })
   
-# ==========================================================================
-# [CORREGIDO] SALIDA DE BOOTSTRAP - MANEJO DE ERRORES
-# ==========================================================================
-output$bootstrap_results_ui <- renderUI({
-  req(rv$bootstrap_resultado)
-  
-  res <- rv$bootstrap_resultado
-  
-  # --- Verificar que los datos existen y son válidos ---
-  if (is.null(res$umbral_optimo) || is.na(res$umbral_optimo)) {
-    return(div(
-      class = "alert alert-warning",
-      icon("exclamation-triangle"),
-      " No se pudo determinar un umbral óptimo. Intenta con más réplicas o un rango diferente."
-    ))
-  }
-  
-  # --- Extraer valores de forma segura ---
-  umbral_optimo <- round(res$umbral_optimo, 2)
-  
-  nodo_original <- res$nodo_original
-  if (is.null(nodo_original) || is.na(nodo_original)) nodo_original <- "No disponible"
-  
-  nodo_mas_frecuente <- res$nodo_mas_frecuente
-  if (is.null(nodo_mas_frecuente) || is.na(nodo_mas_frecuente)) nodo_mas_frecuente <- "No disponible"
-  
-  pct_estable <- res$pct_nodo_mas_frecuente
-  if (is.null(pct_estable) || is.na(pct_estable) || !is.numeric(pct_estable)) {
-    pct_estable <- 0
-  }
-  pct_estable <- round(pct_estable, 1)
-  
-  # --- Encontrar Jaccard para el umbral óptimo ---
-  jaccard_optimo <- NA
-  if (!is.null(res$resultados) && nrow(res$resultados) > 0) {
-    idx <- which(res$resultados$Umbral == res$umbral_optimo)
-    if (length(idx) > 0 && !is.na(res$resultados$Jaccard_Promedio[idx[1]])) {
-      jaccard_optimo <- round(res$resultados$Jaccard_Promedio[idx[1]], 3)
+  # ==========================================================================
+  # SALIDA DE BOOTSTRAP - MANEJO DE ERRORES
+  # ==========================================================================
+  output$bootstrap_results_ui <- renderUI({
+    req(rv$bootstrap_resultado)
+    
+    res <- rv$bootstrap_resultado
+    
+    if (is.null(res$umbral_optimo) || is.na(res$umbral_optimo)) {
+      return(div(
+        class = "alert alert-warning",
+        icon("exclamation-triangle"),
+        " No se pudo determinar un umbral optimo. Intenta con mas replicas o un rango diferente."
+      ))
     }
-  }
+    
+    umbral_optimo <- round(res$umbral_optimo, 2)
+    
+    nodo_original <- res$nodo_original
+    if (is.null(nodo_original) || is.na(nodo_original)) nodo_original <- "No disponible"
+    
+    nodo_mas_frecuente <- res$nodo_mas_frecuente
+    if (is.null(nodo_mas_frecuente) || is.na(nodo_mas_frecuente)) nodo_mas_frecuente <- "No disponible"
+    
+    pct_estable <- res$pct_nodo_mas_frecuente
+    if (is.null(pct_estable) || is.na(pct_estable) || !is.numeric(pct_estable)) {
+      pct_estable <- 0
+    }
+    pct_estable <- round(pct_estable, 1)
+    
+    jaccard_optimo <- NA
+    if (!is.null(res$resultados) && nrow(res$resultados) > 0) {
+      idx <- which(res$resultados$Umbral == res$umbral_optimo)
+      if (length(idx) > 0 && !is.na(res$resultados$Jaccard_Promedio[idx[1]])) {
+        jaccard_optimo <- round(res$resultados$Jaccard_Promedio[idx[1]], 3)
+      }
+    }
+    
+    html_parts <- c(
+      "<div style='background-color: #f0f8ff; padding: 12px; border-radius: 5px; border-left: 4px solid #3498DB;'>",
+      "<b>Optimal threshold:</b> <span style='color:#C0392B;font-size:20px;font-weight:bold;'>", 
+      umbral_optimo, "</span><br>",
+      "<b>Original node:</b> ", nodo_original, "<br>",
+      "<b>Most frequent node (bootstrap):</b> ", nodo_mas_frecuente, 
+      " (", pct_estable, "% stability)<br>"
+    )
+    
+    if (!is.na(jaccard_optimo)) {
+      html_parts <- c(html_parts, "<b>Jaccard similarity:</b> ", jaccard_optimo)
+    } else {
+      html_parts <- c(html_parts, "<b>Jaccard similarity:</b> No disponible")
+    }
+    
+    html_parts <- c(html_parts, "</div>")
+    
+    HTML(paste(html_parts, collapse = ""))
+  })
   
-  # --- Construir HTML de resultados ---
-  html_parts <- c(
-    "<div style='background-color: #f0f8ff; padding: 12px; border-radius: 5px; border-left: 4px solid #3498DB;'>",
-    "<b>Optimal threshold:</b> <span style='color:#C0392B;font-size:20px;font-weight:bold;'>", 
-    umbral_optimo, "</span><br>",
-    "<b>Original node:</b> ", nodo_original, "<br>",
-    "<b>Most frequent node (bootstrap):</b> ", nodo_mas_frecuente, 
-    " (", pct_estable, "% stability)<br>"
-  )
-  
-  if (!is.na(jaccard_optimo)) {
-    html_parts <- c(html_parts, "<b>Jaccard similarity:</b> ", jaccard_optimo)
-  } else {
-    html_parts <- c(html_parts, "<b>Jaccard similarity:</b> No disponible")
-  }
-  
-  html_parts <- c(html_parts, "</div>")
-  
-  HTML(paste(html_parts, collapse = ""))
-})
+  # ==========================================================================
+  # GRAFICO DE BOOTSTRAP
+  # ==========================================================================
+  output$bootstrap_plot <- renderPlot({
+    req(rv$bootstrap_resultado)
+    
+    res <- rv$bootstrap_resultado
+    df <- res$resultados
+    
+    if (is.null(df) || nrow(df) == 0) {
+      return(ggplot() + theme_void() + 
+               annotate("text", x = 0.5, y = 0.5, 
+                        label = "No hay datos para el grafico",
+                        size = 5, color = "#7F8C8D"))
+    }
+    
+    if (!"Jaccard_Promedio" %in% names(df)) {
+      return(ggplot() + theme_void() + 
+               annotate("text", x = 0.5, y = 0.5, 
+                        label = "Datos incompletos para el grafico",
+                        size = 5, color = "#7F8C8D"))
+    }
+    
+    ggplot(df, aes(x = Umbral)) +
+      geom_line(aes(y = Jaccard_Promedio, color = "Jaccard"), linewidth = 1.2) +
+      geom_point(aes(y = Jaccard_Promedio, color = "Jaccard"), size = 2) +
+      geom_vline(xintercept = res$umbral_optimo, linetype = "dashed", color = "#C0392B", linewidth = 1) +
+      annotate("text", x = res$umbral_optimo + 0.008, y = max(df$Jaccard_Promedio, na.rm = TRUE) * 0.9,
+               label = paste0("Optimal = ", round(res$umbral_optimo, 2)),
+               color = "#C0392B", fontface = "bold", hjust = 0) +
+      scale_y_continuous(labels = scales::percent, limits = c(0, 1)) +
+      labs(title = "Graph stability by threshold (Jaccard)",
+           x = "Correlation threshold", y = "Jaccard similarity") +
+      theme_minimal(base_size = 11) +
+      theme(legend.position = "bottom")
+  })
   
   # ==========================================================================
   # EJECUTAR MPCS
@@ -846,21 +873,15 @@ output$bootstrap_results_ui <- renderUI({
         
         alpha_grupo <- calcular_alpha(sub)
         
-        # ============================================================
-        # DETECTAR ORDEN LOGICO DE ESTADOS
-        # ============================================================
+        # --- Detectar orden de estados ---
         estados_unicos <- unique(sub[[input$markov_var]])
         estados_unicos <- estados_unicos[!is.na(estados_unicos) & estados_unicos != ""]
         orden_estados <- detectar_orden_estados(estados_unicos)
         
-        # ============================================================
-        # PROCESAR TASAS DE AVANCE DESDE INPUT
-        # ============================================================
+        # --- Procesar tasas de avance ---
         tasas_avance <- procesar_tasas_avance(orden_estados)
         
-        # ============================================================
-        # Markov CON ORDEN CORRECTO Y TASAS DE AVANCE
-        # ============================================================
+        # --- Markov ---
         markov_res <- calcular_markov(
           sub[[input$markov_var]], 
           orden_estados = orden_estados,
@@ -869,14 +890,10 @@ output$bootstrap_results_ui <- renderUI({
           horizonte = 10
         )
         
-        # ============================================================
-        # Juegos
-        # ============================================================
+        # --- Juegos ---
         games_res <- calcular_juegos(markov_res$mat, input$R_factor, alpha = alpha_grupo)
         
-        # ============================================================
-        # Indice integrado
-        # ============================================================
+        # --- Indice integrado ---
         index_res <- calcular_indice(
           I_grafo = graph_res$score,
           I_markov = markov_res$score,
@@ -913,9 +930,7 @@ output$bootstrap_results_ui <- renderUI({
         return()
       }
       
-      # ============================================================
-      # CALCULAR SIM_NUDGE PARA CADA GRUPO USANDO k
-      # ============================================================
+      # --- Calcular sim_nudge para cada grupo ---
       for (g in names(results_list)) {
         r <- results_list[[g]]
         if (!is.null(r$markov_mat) && !is.null(r$sim_base)) {
