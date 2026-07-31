@@ -642,14 +642,17 @@ observeEvent(input$run_bootstrap, {
     variables <- input$graph_vars
     n_boot <- input$boot_n_sim
     
-    # --- Función de progreso ---
+    # --- Función de progreso SIMPLIFICADA ---
     progress_callback <- function(progress) {
-      incProgress(
-        amount = progress - getProgress()$value,  # Incremento desde el último valor
+      # Usar incProgress con un valor absoluto
+      # El valor de progress viene entre 0 y 1
+      shiny::incProgress(
+        amount = progress - 0.05,  # Ajuste para empezar desde 0.05
         detail = paste0(round(progress * 100, 0), "% completed")
       )
     }
     
+    # Inicializar la barra
     incProgress(0.05, detail = "Preparing data...")
     
     # --- Ejecutar bootstrap ---
@@ -672,7 +675,6 @@ observeEvent(input$run_bootstrap, {
   
   showNotification("Bootstrap completed successfully!", type = "message")
 })
-  
   # ==========================================================================
   # FUNCION PARA PROCESAR TASAS DE AVANCE
   # ==========================================================================
