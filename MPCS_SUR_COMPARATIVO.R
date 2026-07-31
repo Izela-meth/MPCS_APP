@@ -30,8 +30,10 @@ library(ggplot2); library(igraph); library(scales); library(gridExtra)
 # =============================================================================
 # CONFIGURACIÓN — CAMBIA LAS RUTAS AQUÍ <<<
 # =============================================================================
-ruta_csalud <- "C:/Users/Blue/Documents/Rstudio/CENDES/CSALUD01_2024.dta"
-ruta_rech0  <- "C:/Users/Blue/Documents/Rstudio/CENDES/RECH0_2024.dta"
+cat("Selecciona el archivo CSALUD01_2024.dta...\n")
+ruta_csalud <- file.choose()
+cat("Selecciona el archivo RECH0_2024.dta...\n")
+ruta_rech0 <- file.choose()
 
 # Regiones del sur con sus códigos HV023
 regiones_sur <- list(
