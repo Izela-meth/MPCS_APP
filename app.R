@@ -1,10 +1,10 @@
 # ==============================================================================
-# MPCS_APP — Aplicación Shiny del Modelo Predictivo de Cambio Conductual por Sistemas
+# MPCS_APP — Aplicacion Shiny del Modelo Predictivo de Cambio Conductual por Sistemas
 # ==============================================================================
 # Repositorio: https://github.com/Izela-meth/MPCS_APP
 # ==============================================================================
 
-# --- Cargar librerías ---
+# --- Cargar librerias ---
 library(shiny)
 library(bslib)
 library(DT)
@@ -21,7 +21,7 @@ library(patchwork)
 source("functions/mpcs_functions.R", local = TRUE)
 
 # ==============================================================================
-# GENERAR DATOS DE DEMOSTRACIÓN INICIALES (SOLO ENDES)
+# GENERAR DATOS DE DEMOSTRACION INICIALES (SOLO ENDES)
 # ==============================================================================
 if (!file.exists("data/demo_data.csv")) {
   dir.create("data", showWarnings = FALSE)
@@ -78,7 +78,7 @@ ui <- page_navbar(
   ),
   
   # ============================================================================
-  # Pestaña 2: Configuración
+  # Pestaña 2: Configuracion
   # ============================================================================
   nav_panel(
     "2. Configuracion",
@@ -213,14 +213,14 @@ ui <- page_navbar(
         width = 6,
         wellPanel(
           h5("Arbol de Transicion de Markov"),
-          plotOutput("plot_arbol_markov", height = "400px")
+          plotOutput("plot_arbol_markov", height = "450px")
         )
       ),
       column(
         width = 6,
         wellPanel(
           h5("Dinamica de Teoria de Juegos"),
-          plotOutput("plot_juego_evolutivo", height = "400px")
+          plotOutput("plot_juego_evolutivo", height = "450px")
         )
       )
     ),
@@ -792,7 +792,7 @@ server <- function(input, output, session) {
                annotate("text", x = 0.5, y = 0.5, label = "No hay datos para trayectorias"))
     }
     
-    # Arbol de Markov (CORREGIDO)
+    # Arbol de Markov (CON NUEVA VERSION MEJORADA)
     p_arbol <- function() {
       if (!is.null(r$markov_mat)) {
         # Obtener estados correctamente
@@ -807,7 +807,7 @@ server <- function(input, output, session) {
         return(graficar_arbol_markov(
           P = r$markov_mat,
           estados = estados_arbol,
-          umbral_prob = 0.05,
+          umbral_prob = 0.03,
           titulo = paste("Arbol de Transicion -", first_group)
         ))
       }
@@ -874,7 +874,9 @@ server <- function(input, output, session) {
   
   output$plot_arbol_markov <- renderPlot({
     req(rv$plots)
-    if (!is.null(rv$plots$arbol)) rv$plots$arbol() else {
+    if (!is.null(rv$plots$arbol)) {
+      rv$plots$arbol()
+    } else {
       ggplot() + theme_void() + 
         annotate("text", x = 0.5, y = 0.5, label = "No se pudo generar el arbol de Markov.")
     }
