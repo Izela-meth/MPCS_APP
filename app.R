@@ -20,7 +20,450 @@ library(patchwork)
 # --- Cargar funciones modulares ---
 source("functions/mpcs_functions.R", local = TRUE)
 
-# --- Generar datos de demostración si no existen ---
+# ==============================================================================
+# FUNCIÓN PARA GENERAR DATOS DE AULA (EDUCACIÓN)
+# ==============================================================================
+
+#' Generar datos simulados de participación en el aula (ejemplo educativo)
+#'
+#' @param n número de estudiantes
+#' @param seed semilla para reproducibilidad
+#' @return data.frame con datos simulados
+generar_datos_aula <- function(n = 200, seed = 456) {
+  
+  set.seed(seed)
+  
+  # --- Variables de participación ---
+  # Estados: 1 = Nunca, 2 = Rara vez, 3 = A veces, 4 = Casi siempre
+  estados_base <- sample(1:4, n, replace = TRUE, prob = c(0.30, 0.35, 0.25, 0.10))
+  
+  # --- Variables académicas ---
+  # Notas de práctica (0-20)
+  nota_practica <- round(rnorm(n, mean = 12, sd = 3), 1)
+  nota_practica <- pmax(0, pmin(20, nota_practica))
+  
+  # Intervenciones orales (0-20)
+  nota_intervenciones <- round(rnorm(n, mean = 10 + 2 * (estados_base - 1), sd = 2.5), 1)
+  nota_intervenciones <- pmax(0, pmin(20, nota_intervenciones))
+  
+  # Exposiciones (0-20)
+  nota_exposicion <- round(rnorm(n, mean = 11 + 1.5 * (estados_base - 1), sd = 2.5), 1)
+  nota_exposicion <- pmax(0, pmin(20, nota_exposicion))
+  
+  # Asistencia (%)
+  asistencia <- round(pmin(100, pmax(40, rnorm(n, mean = 75 + 5 * (estados_base - 1), sd = 10))), 1)
+  
+  # Evaluación continua (promedio de práctica, intervenciones, exposición, asistencia normalizada)
+  asistencia_norm <- asistencia / 100 * 20  # Escalar a 0-20
+  eval_continua <- round(rowMeans(cbind(nota_practica, nota_intervenciones, nota_exposicion, asistencia_norm)), 1)
+  eval_continua <- pmax(0, pmin(20, eval_continua))
+  
+  # Examen parcial (0-20)
+  examen_parcial <- round(rnorm(n, mean = 10 + 1.5 * (estados_base - 1), sd = 3), 1)
+  examen_parcial <- pmax(0, pmin(20, examen_parcial))
+  
+  # Nota final (promedio de evaluación continua y examen parcial)
+  nota_final <- round((eval_continua + examen_parcial) / 2, 1)
+  nota_final <- pmax(0, pmin(20, nota_final))
+  
+  # --- Variables contextuales ---
+  # Influencia de pares (1-4)
+  peer_influence <- round(pmin(4, pmax(1, estados_base + rnorm(n, mean = 0, sd = 0.6))), 0)
+  peer_influence <- as.numeric(cut(peer_influence, breaks = c(0, 1.5, 2.5, 3.5, 5), labels = 1:4))
+  
+  # Ánimo del profesor (0-10)
+  teacher_encouragement <- round(pmin(10, pmax(0, rnorm(n, mean = 5 + 1.5 * (estados_base - 1), sd = 2))), 1)
+  
+  # --- Variable de agrupación (opcional) ---
+  grupo <- sample(c("Sección A", "Sección B", "Sección C"), n, replace = TRUE, prob = c(0.40, 0.35, 0.25))
+  
+  # --- Crear dataset ---
+  data.frame(
+    ID = 1:n,
+    Grupo = grupo,
+    Estado_Participacion = factor(estados_base, 
+                                   levels = 1:4, 
+                                   labels = c("Nunca", "Rara_vez", "A_veces", "Casi_siempre")),
+    Nota_Practica = nota_practica,
+    Nota_Intervenciones = nota_intervenciones,
+    Nota_Exposicion = nota_exposicion,
+    Asistencia = asistencia,
+    Eval_Continua = eval_continua,
+    Examen_Parcial = examen_parcial,
+    Nota_Final = nota_final,
+    Peer_Influence = peer_influence,
+    Teacher_Encouragement = teacher_encouragement,
+    stringsAsFactors = FALSE
+  )
+}
+
+# ==============================================================================
+# FUNCIONES PARA GRÁFICOS ADICIONALES
+# ==============================================================================
+
+# --- Función para graficar árbol de transición de Markov ---
+graficar_arbol_markov <- function(P, estados, umbral_prob = 0.01, 
+                                  titulo = "Árbol de Transición de Markov") {
+  
+  if (is.null(P) || is.null(estados)) {
+    return(ggplot() + theme_void() + 
+             annotate("text", x = 0.5, y = 0.5, label = "No hay datos para el árbol de Markov"))
+  }
+  
+  m <- nrow(P)
+  if (m < 2) {
+    return(ggplot() + theme_void() + 
+             annotate("text", x = 0.5, y = 0.5, label = "Se necesitan al menos 2 estados"))
+  }
+  
+  # Asegurar que estados sea un vector de caracteres
+  if (is.null(colnames(P))) {
+    estados <- paste0("E", 1:m)
+  } else {
+    estados <- colnames(P)
+  }
+  
+  # Crear data.frame de aristas (transiciones)
+  aristas <- data.frame()
+  for (i in 1:m) {
+    for (j in 1:m) {
+      if (P[i, j] >= umbral_prob && i != j) {
+        # Formatear nombres de estados para mostrar más cortos
+        nombre_from <- estados[i]
+        nombre_to <- estados[j]
+        # Acortar nombres largos para el gráfico
+        if (nchar(nombre_from) > 15) nombre_from <- substr(nombre_from, 1, 12) 
+        if (nchar(nombre_to) > 15) nombre_to <- substr(nombre_to, 1, 12)
+        
+        aristas <- rbind(aristas, data.frame(
+          from = nombre_from,
+          to = nombre_to,
+          prob = round(P[i, j] * 100, 1)
+        ))
+      }
+    }
+  }
+  
+  if (nrow(aristas) == 0) {
+    return(ggplot() + theme_void() + 
+             annotate("text", x = 0.5, y = 0.5, label = "No hay transiciones significativas (umbral > 1%)"))
+  }
+  
+  # Crear grafo
+  g <- igraph::graph_from_data_frame(aristas, directed = TRUE)
+  
+  # Intentar layout en árbol
+  tryCatch({
+    layout <- igraph::layout_as_tree(g, root = 1, circular = FALSE)
+  }, error = function(e) {
+    layout <- igraph::layout_with_fr(g)
+  })
+  
+  # Crear data.frame para ggplot
+  coords <- data.frame(
+    x = layout[, 1],
+    y = layout[, 2],
+    name = igraph::V(g)$name
+  )
+  
+  # Crear data.frame de aristas con coordenadas
+  edge_data <- data.frame()
+  for (i in 1:nrow(aristas)) {
+    from_idx <- which(coords$name == aristas$from[i])
+    to_idx <- which(coords$name == aristas$to[i])
+    if (length(from_idx) > 0 && length(to_idx) > 0) {
+      edge_data <- rbind(edge_data, data.frame(
+        x = coords$x[from_idx],
+        y = coords$y[from_idx],
+        xend = coords$x[to_idx],
+        yend = coords$y[to_idx],
+        prob = aristas$prob[i],
+        from = aristas$from[i],
+        to = aristas$to[i]
+      ))
+    }
+  }
+  
+  if (nrow(edge_data) == 0) {
+    return(ggplot() + theme_void() + 
+             annotate("text", x = 0.5, y = 0.5, label = "Error al generar el árbol"))
+  }
+  
+  # Graficar
+  p <- ggplot2::ggplot() +
+    # Flechas de transición
+    ggplot2::geom_segment(
+      data = edge_data,
+      aes(x = x, y = y, xend = xend, yend = yend),
+      arrow = arrow(length = unit(0.25, "cm"), type = "closed"),
+      color = "#2C3E50",
+      linewidth = 0.8,
+      alpha = 0.6
+    ) +
+    # Etiquetas de probabilidad (en el punto medio)
+    ggplot2::geom_text(
+      data = edge_data,
+      aes(x = (x + xend)/2, y = (y + yend)/2 + 0.05, 
+          label = paste0(prob, "%")),
+      size = 3.5,
+      color = "#E74C3C",
+      fontface = "bold"
+    ) +
+    # Nodos (estados)
+    ggplot2::geom_point(
+      data = coords,
+      aes(x = x, y = y),
+      size = 20,
+      color = "#3498DB",
+      fill = "#D6EAF8",
+      shape = 21,
+      stroke = 1.5
+    ) +
+    # Etiquetas de nodos
+    ggplot2::geom_text(
+      data = coords,
+      aes(x = x, y = y, label = name),
+      size = 3.5,
+      fontface = "bold",
+      color = "#1A3A5C"
+    ) +
+    # Títulos
+    ggplot2::labs(
+      title = titulo,
+      subtitle = paste0("Transiciones con probabilidad ≥ ", round(umbral_prob * 100, 0), "%"),
+      x = "", y = ""
+    ) +
+    ggplot2::theme_minimal(base_size = 11) +
+    ggplot2::theme(
+      axis.text = element_blank(),
+      axis.ticks = element_blank(),
+      panel.grid = element_blank(),
+      plot.title = element_text(face = "bold", size = 13, hjust = 0.5),
+      plot.subtitle = element_text(size = 10, hjust = 0.5, color = "#7F8C8D")
+    )
+  
+  return(p)
+}
+
+# --- Función para graficar teoría de juegos ---
+graficar_juego_evolutivo <- function(alpha = 0.60, p_star = NULL, 
+                                     titulo = "Dinámica Replicadora") {
+  
+  if (is.na(alpha) || is.null(alpha)) alpha <- 0.60
+  
+  # --- Calcular matriz de pagos ---
+  a_AA <- 2.0
+  a_AR <- -(0.5 + 0.5 * (1 - alpha))
+  a_RA <- 0.5 + 0.5 * alpha
+  a_RR <- 0.5 + 0.5 * (1 - alpha)
+  
+  # --- Calcular p* si no se proporciona ---
+  if (is.null(p_star) || is.na(p_star)) {
+    numerador <- a_RR - a_AR
+    denominador <- a_AA - a_AR - a_RA + a_RR
+    if (denominador != 0) {
+      p_star <- numerador / denominador
+      p_star <- max(0, min(1, p_star))
+    } else {
+      p_star <- 0.50
+    }
+  }
+  
+  # --- Crear grid de valores de p ---
+  p <- seq(0, 1, length.out = 100)
+  
+  # --- Calcular payoffs ---
+  f_A <- p * a_AA + (1 - p) * a_AR
+  f_R <- p * a_RA + (1 - p) * a_RR
+  
+  # --- Calcular dp/dt (replicador) ---
+  dp_dt <- p * (1 - p) * (f_A - f_R)
+  
+  # --- Crear data.frame ---
+  df <- data.frame(
+    p = p,
+    f_A = f_A,
+    f_R = f_R,
+    dp_dt = dp_dt,
+    diferencia = f_A - f_R
+  )
+  
+  # --- Gráfico de payoffs ---
+  p1 <- ggplot(df, aes(x = p)) +
+    # Líneas de payoffs
+    geom_line(aes(y = f_A, color = "Adoptantes (A)"), linewidth = 1.2) +
+    geom_line(aes(y = f_R, color = "Resistentes (R)"), linewidth = 1.2) +
+    # Punto de equilibrio p*
+    geom_vline(xintercept = p_star, linetype = "dashed", color = "#C0392B", linewidth = 1) +
+    geom_hline(yintercept = 0, linetype = "dotted", color = "#7F8C8D", linewidth = 0.5) +
+    # Anotación de p*
+    annotate("text", x = min(p_star + 0.05, 0.95), y = max(df$f_A) * 0.85,
+             label = paste0("p* = ", round(p_star, 3)),
+             color = "#C0392B", fontface = "bold", size = 4.5, hjust = 0) +
+    # Anotación de regiones
+    annotate("rect", xmin = 0, xmax = p_star, ymin = -Inf, ymax = Inf,
+             alpha = 0.08, fill = "#E74C3C") +
+    annotate("rect", xmin = p_star, xmax = 1, ymin = -Inf, ymax = Inf,
+             alpha = 0.08, fill = "#2ECC71") +
+    annotate("text", x = p_star / 2, y = max(df$f_A) * 0.95,
+             label = "Inestable", color = "#C0392B", size = 3.5, hjust = 0.5) +
+    annotate("text", x = (1 + p_star) / 2, y = max(df$f_A) * 0.95,
+             label = "Estable", color = "#27AE60", size = 3.5, hjust = 0.5) +
+    # Escalas
+    scale_x_continuous(labels = scales::percent, limits = c(0, 1)) +
+    scale_y_continuous(labels = scales::number) +
+    scale_color_manual(
+      name = "Estrategia",
+      values = c("Adoptantes (A)" = "#2E86AB", "Resistentes (R)" = "#E84855")
+    ) +
+    # Títulos
+    labs(
+      title = titulo,
+      subtitle = paste0("α = ", round(alpha, 3), " | Masa crítica (p*) = ", round(p_star, 3)),
+      x = "Proporción de adoptantes (p)",
+      y = "Pago esperado",
+      color = "Estrategia"
+    ) +
+    theme_minimal(base_size = 11) +
+    theme(
+      legend.position = "bottom",
+      plot.title = element_text(face = "bold", size = 13, hjust = 0.5),
+      plot.subtitle = element_text(size = 10, hjust = 0.5, color = "#7F8C8D")
+    )
+  
+  # --- Gráfico de la dinámica replicadora (dp/dt) ---
+  p2 <- ggplot(df, aes(x = p, y = dp_dt)) +
+    geom_hline(yintercept = 0, linetype = "dotted", color = "#7F8C8D", linewidth = 0.5) +
+    geom_line(color = "#8E44AD", linewidth = 1.2) +
+    geom_area(aes(fill = dp_dt > 0), alpha = 0.3) +
+    geom_vline(xintercept = p_star, linetype = "dashed", color = "#C0392B", linewidth = 1) +
+    # Anotación de p*
+    annotate("text", x = min(p_star + 0.05, 0.95), y = max(abs(dp_dt), na.rm = TRUE) * 0.85,
+             label = paste0("p* = ", round(p_star, 3)),
+             color = "#C0392B", fontface = "bold", size = 4, hjust = 0) +
+    # Escalas
+    scale_x_continuous(labels = scales::percent, limits = c(0, 1)) +
+    scale_y_continuous(labels = scales::number) +
+    scale_fill_manual(values = c("#E74C3C", "#2ECC71"), guide = "none") +
+    # Títulos
+    labs(
+      title = "Dinámica Replicadora (dp/dt)",
+      subtitle = "Velocidad de cambio en la proporción de adoptantes",
+      x = "Proporción de adoptantes (p)",
+      y = "dp/dt (tasa de cambio)"
+    ) +
+    theme_minimal(base_size = 11) +
+    theme(
+      plot.title = element_text(face = "bold", size = 13, hjust = 0.5),
+      plot.subtitle = element_text(size = 10, hjust = 0.5, color = "#7F8C8D")
+    )
+  
+  # --- Combinar gráficos ---
+  p_combinado <- p1 + p2 + 
+    patchwork::plot_annotation(
+      title = paste0("Análisis de Teoría de Juegos - MPCS"),
+      subtitle = paste0("α = ", round(alpha, 3), " | p* = ", round(p_star, 3)),
+      theme = theme(
+        plot.title = element_text(face = "bold", size = 14, hjust = 0.5),
+        plot.subtitle = element_text(size = 11, hjust = 0.5, color = "#7F8C8D")
+      )
+    )
+  
+  return(p_combinado)
+}
+
+# --- Función para graficar trayectorias de Markov mejoradas ---
+graficar_trayectorias_markov <- function(sim_base, sim_nudge = NULL, 
+                                         estados = NULL, 
+                                         titulo = "Trayectorias de Markov",
+                                         dominio = "salud") {
+  
+  if (is.null(sim_base)) {
+    return(ggplot() + theme_void() + 
+             annotate("text", x = 0.5, y = 0.5, label = "No hay datos para trayectorias"))
+  }
+  
+  # Obtener nombres de estados
+  if (is.null(estados)) {
+    estados <- colnames(sim_base)
+    if (is.null(estados)) {
+      estados <- paste0("E", 1:ncol(sim_base))
+    }
+  }
+  
+  n_estados <- length(estados)
+  
+  # --- Preparar datos base ---
+  df_base <- as.data.frame(sim_base)
+  colnames(df_base) <- estados
+  df_base$Periodo <- 0:(nrow(df_base) - 1)
+  df_base$Escenario <- "Sin nudge"
+  
+  # --- Preparar datos con nudge ---
+  if (!is.null(sim_nudge)) {
+    df_nudge <- as.data.frame(sim_nudge)
+    # Asegurar que tiene el mismo número de columnas
+    if (ncol(df_nudge) == ncol(df_base) - 2) {
+      colnames(df_nudge) <- estados
+      df_nudge$Periodo <- 0:(nrow(df_nudge) - 1)
+      df_nudge$Escenario <- "Con nudge"
+      df_combined <- rbind(df_base, df_nudge)
+    } else {
+      df_combined <- df_base
+    }
+  } else {
+    df_combined <- df_base
+  }
+  
+  # --- Transformar a formato largo ---
+  df_long <- tidyr::pivot_longer(
+    df_combined,
+    cols = all_of(estados),
+    names_to = "Estado",
+    values_to = "Probabilidad"
+  )
+  
+  # --- Determinar etiqueta del eje Y según dominio ---
+  if (dominio == "educacion" || dominio == "aula") {
+    y_label <- "P(Participación)"
+    titulo_estados <- "Estados de Participación"
+  } else {
+    y_label <- "P(Adherencia)"
+    titulo_estados <- "Estados de Adherencia"
+  }
+  
+  # --- Graficar ---
+  p <- ggplot(df_long, aes(x = Periodo, y = Probabilidad, 
+                           color = Estado, linetype = Escenario)) +
+    geom_line(linewidth = 1.1) +
+    geom_point(data = df_long %>% filter(Periodo %% max(1, round(max(df_long$Periodo)/10)) == 0), 
+               size = 1.5, alpha = 0.6) +
+    scale_y_continuous(labels = scales::percent, limits = c(0, 1)) +
+    scale_x_continuous(breaks = seq(0, max(df_long$Periodo), by = max(1, round(max(df_long$Periodo)/5)))) +
+    scale_color_brewer(palette = "Set1") +
+    labs(
+      title = titulo,
+      subtitle = paste("Evolución de", tolower(titulo_estados), "en el tiempo"),
+      x = "Período",
+      y = y_label,
+      color = titulo_estados,
+      linetype = "Escenario"
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(
+      legend.position = "bottom",
+      legend.box = "vertical",
+      plot.title = element_text(face = "bold", size = 14, hjust = 0.5),
+      plot.subtitle = element_text(size = 11, hjust = 0.5, color = "#7F8C8D"),
+      axis.text.x = element_text(angle = 45, hjust = 1)
+    )
+  
+  return(p)
+}
+
+# ==============================================================================
+# GENERAR DATOS DE DEMOSTRACIÓN
+# ==============================================================================
 if (!file.exists("data/demo_data.csv")) {
   dir.create("data", showWarnings = FALSE)
   datos_demo <- generar_demo_data(n = 1000, seed = 123)
@@ -56,10 +499,19 @@ ui <- page_navbar(
           tags$small("Formatos soportados: CSV, Excel (.xlsx, .xls), Stata (.dta)"),
           hr(),
           h4("O usar datos de demostración"),
-          p("Carga los datos de la ENDES 2024 (simulados) para probar la aplicación."),
-          actionButton("load_demo", "Cargar Datos Demo", 
-                       class = "btn-primary w-100",
-                       icon = icon("play"))
+          p("Carga datos simulados para probar la aplicación."),
+          fluidRow(
+            column(6,
+              actionButton("load_demo", "Cargar ENDES (Salud)", 
+                           class = "btn-primary w-100",
+                           icon = icon("heart"))
+            ),
+            column(6,
+              actionButton("load_aula", "Cargar Aula (Educación)", 
+                           class = "btn-info w-100",
+                           icon = icon("users"))
+            )
+          )
         )
       ),
       column(
@@ -90,7 +542,13 @@ ui <- page_navbar(
           hr(),
           h4("Variable de agrupación (opcional)"),
           helpText("Si seleccionas una variable, el análisis se realizará por separado para cada grupo."),
-          uiOutput("group_var_ui")
+          uiOutput("group_var_ui"),
+          hr(),
+          h4("Dominio de aplicación"),
+          selectInput("dominio", "Selecciona el dominio:",
+                      choices = c("Salud" = "salud", "Educación" = "educacion"),
+                      selected = "salud"),
+          helpText("Esto ajusta las etiquetas de los gráficos (ej. 'Adherencia' vs 'Participación').")
         )
       ),
       column(
@@ -133,15 +591,12 @@ ui <- page_navbar(
               Esto permite capturar mejor las diferencias en las condiciones iniciales 
               entre grupos.<br><br>
               <b>I_Juegos (Teoría de Juegos):</b> La matriz de pagos es <b>dinámica</b> 
-              y depende del indicador de acceso a salud (<i>α</i>) calculado a partir 
+              y depende del indicador contextual (<i>α</i>) calculado a partir 
               de los datos del grupo. Esto permite que la masa crítica <i>p*</i> varíe 
-              según el contexto (entre 0.53 y 0.55 en el caso de estudio), reflejando 
-              que en entornos con menor acceso se requiere una mayor proporción de 
-              adoptantes para que la conducta sea autosostenible.<br><br>
-              <b>Referencia:</b> Los resultados del caso de estudio (ENDES 2024, seis regiones) 
-              fueron producidos con el script de aplicación específica (Material Suplementario), 
-              que calibra la matriz con tasas de transición de la literatura longitudinal 
-              (Jensen et al., 2014; Lo-Ciganic et al., 2016)."
+              según el contexto.<br><br>
+              <b>Dominios:</b> La app soporta salud (adherencia a medicamentos) y 
+              educación (participación en el aula). Las etiquetas de los gráficos se 
+              ajustan automáticamente."
             )
           )
         )
@@ -178,7 +633,7 @@ ui <- page_navbar(
       column(
         width = 6,
         wellPanel(
-          h5("Grafo conductual (primer grupo)"),
+          h5("Grafo conductual"),
           plotOutput("plot_graph", height = "500px")
         )
       ),
@@ -194,7 +649,23 @@ ui <- page_navbar(
       column(
         width = 6,
         wellPanel(
-          h5("Trayectorias de Markov"),
+          h5("🌳 Árbol de Transición de Markov"),
+          plotOutput("plot_arbol_markov", height = "400px")
+        )
+      ),
+      column(
+        width = 6,
+        wellPanel(
+          h5("🎮 Dinámica de Teoría de Juegos"),
+          plotOutput("plot_juego_evolutivo", height = "400px")
+        )
+      )
+    ),
+    fluidRow(
+      column(
+        width = 6,
+        wellPanel(
+          h5("📈 Trayectorias de Markov"),
           plotOutput("plot_markov", height = "400px")
         )
       ),
@@ -302,7 +773,8 @@ server <- function(input, output, session) {
     results = NULL,
     results_df = NULL,
     plots = NULL,
-    sens_resultado = NULL
+    sens_resultado = NULL,
+    dominio = "salud"
   )
   
   # ==========================================================================
@@ -340,20 +812,24 @@ server <- function(input, output, session) {
   })
   
   # ==========================================================================
-  # CARGA DE DATOS DE DEMOSTRACIÓN
+  # CARGA DE DATOS DE DEMOSTRACIÓN (ENDES - Salud)
   # ==========================================================================
   observeEvent(input$load_demo, {
-    showNotification("Cargando datos de demostración...", type = "message")
+    showNotification("Cargando datos de demostración (ENDES - Salud)...", type = "message")
     
     generar_y_cargar_demo <- function() {
       datos_demo <- generar_demo_data(1000, 123)
       rv$data <- datos_demo
+      rv$dominio <- "salud"
+      updateSelectInput(session, "dominio", selected = "salud")
       showNotification("Datos de demostración generados exitosamente (n=1000).", type = "message")
     }
     
     if (file.exists("data/demo_data.csv")) {
       tryCatch({
         rv$data <- read.csv("data/demo_data.csv")
+        rv$dominio <- "salud"
+        updateSelectInput(session, "dominio", selected = "salud")
         showNotification("Datos de demostración cargados desde archivo.", type = "message")
       }, error = function(e) {
         showNotification(paste("Error al leer archivo:", e$message), type = "error")
@@ -372,6 +848,33 @@ server <- function(input, output, session) {
   })
   
   # ==========================================================================
+  # CARGA DE DATOS DE AULA (Educación)
+  # ==========================================================================
+  observeEvent(input$load_aula, {
+    showNotification("Generando datos de participación en el aula...", type = "message")
+    
+    datos_aula <- generar_datos_aula(n = 200, seed = 456)
+    rv$data <- datos_aula
+    rv$dominio <- "educacion"
+    updateSelectInput(session, "dominio", selected = "educacion")
+    
+    showNotification(paste("Datos de aula generados:", nrow(datos_aula), "estudiantes"), type = "message")
+    
+    vars <- names(datos_aula)
+    vars_num <- names(datos_aula)[sapply(datos_aula, is.numeric)]
+    updateSelectInput(session, "graph_vars", 
+                      choices = vars_num, 
+                      selected = c("Eval_Continua", "Examen_Parcial", "Nota_Final", 
+                                   "Nota_Practica", "Nota_Intervenciones", "Peer_Influence"))
+    updateSelectInput(session, "markov_var", 
+                      choices = vars, 
+                      selected = "Estado_Participacion")
+    updateSelectInput(session, "group_var", 
+                      choices = c("Ninguno (Global)", vars), 
+                      selected = "Grupo")
+  })
+  
+  # ==========================================================================
   # SALIDAS DE VISTA PREVIA
   # ==========================================================================
   output$data_preview <- renderDT({
@@ -384,6 +887,7 @@ server <- function(input, output, session) {
     cat("Observaciones (n):", nrow(rv$data), "\n")
     cat("Variables:", ncol(rv$data), "\n")
     cat("Valores faltantes:", sum(is.na(rv$data)), "\n\n")
+    cat("Dominio:", rv$dominio, "\n\n")
     print(table(sapply(rv$data, class)))
   })
   
@@ -402,13 +906,28 @@ server <- function(input, output, session) {
   output$markov_var_ui <- renderUI({
     req(rv$data)
     vars <- names(rv$data)
-    selectInput("markov_var", "Variable de estados Markov:", choices = vars, selected = if ("Estado_Markov" %in% vars) "Estado_Markov" else vars[1])
+    # Seleccionar por defecto según dominio
+    default <- if (rv$dominio == "educacion" && "Estado_Participacion" %in% vars) {
+      "Estado_Participacion"
+    } else if ("Estado_Markov" %in% vars) {
+      "Estado_Markov"
+    } else {
+      vars[1]
+    }
+    selectInput("markov_var", "Variable de estados Markov:", choices = vars, selected = default)
   })
   
   output$group_var_ui <- renderUI({
     req(rv$data)
     vars <- c("Ninguno (Global)", names(rv$data))
-    selectInput("group_var", "Variable de agrupación:", choices = vars, selected = if ("Region" %in% vars) "Region" else "Ninguno (Global)")
+    default <- if (rv$dominio == "educacion" && "Grupo" %in% names(rv$data)) {
+      "Grupo"
+    } else if ("Region" %in% names(rv$data)) {
+      "Region"
+    } else {
+      "Ninguno (Global)"
+    }
+    selectInput("group_var", "Variable de agrupación:", choices = vars, selected = default)
   })
   
   output$suma_ponderadores <- renderText({
@@ -491,22 +1010,50 @@ server <- function(input, output, session) {
         }
         
         # ============================================================
-        # [CORREGIDO] Calcular alpha para el grupo
+        # Calcular alpha para el grupo (contexto)
         # ============================================================
         alpha_grupo <- 0.60  # valor por defecto
+        
+        # Para salud: usar Acceso_salud
         if ("Acceso_salud" %in% names(sub)) {
           alpha_grupo <- mean(sub$Acceso_salud, na.rm = TRUE)
           if (is.na(alpha_grupo) || is.nan(alpha_grupo)) alpha_grupo <- 0.60
         }
+        # Para educación: usar Peer_Influence y Teacher_Encouragement
+        else if (all(c("Peer_Influence", "Teacher_Encouragement") %in% names(sub))) {
+          alpha_grupo <- mean((sub$Peer_Influence / 4 + sub$Teacher_Encouragement / 10) / 2, na.rm = TRUE)
+          if (is.na(alpha_grupo) || is.nan(alpha_grupo)) alpha_grupo <- 0.60
+        }
         
-        # [CORREGIDO] Pasar horizonte = 10 a calcular_markov (Opción B)
+        # ============================================================
+        # Markov
+        # ============================================================
+        # Ordenar estados para educación
+        if (rv$dominio == "educacion") {
+          orden_estados <- c("Nunca", "Rara_vez", "A_veces", "Casi_siempre")
+          # Verificar que todos los estados estén en el orden
+          estados_unicos <- unique(sub[[input$markov_var]])
+          faltantes <- setdiff(estados_unicos, orden_estados)
+          if (length(faltantes) > 0) {
+            orden_estados <- c(orden_estados, faltantes)
+          }
+        } else {
+          orden_estados <- NULL
+        }
+        
         markov_res <- calcular_markov(sub[[input$markov_var]], 
+                                      orden_estados = orden_estados,
                                       umbral_objetivo = 0.50, 
                                       horizonte = 10)
         
-        # [CORREGIDO] Pasar alpha a calcular_juegos (dinámico)
+        # ============================================================
+        # Juegos
+        # ============================================================
         games_res <- calcular_juegos(markov_res$mat, input$R_factor, alpha = alpha_grupo)
         
+        # ============================================================
+        # Índice integrado
+        # ============================================================
         index_res <- calcular_indice(
           I_grafo = graph_res$score,
           I_markov = markov_res$score,
@@ -532,8 +1079,10 @@ server <- function(input, output, session) {
           graph_data = graph_data,
           markov_mat = markov_res$mat,
           sim_base = markov_res$sim_base,
+          sim_nudge = NULL,  # Se calculará después
           dist_actual = markov_res$dist_actual,
-          T_base = markov_res$T_base
+          T_base = markov_res$T_base,
+          estados = if (rv$dominio == "educacion") orden_estados else NULL
         )
       }
       
@@ -542,9 +1091,27 @@ server <- function(input, output, session) {
         return()
       }
       
+      # Calcular sim_nudge para cada grupo
+      for (g in names(results_list)) {
+        r <- results_list[[g]]
+        if (!is.null(r$markov_mat) && !is.null(r$sim_base)) {
+          P_n <- r$markov_mat
+          for (i in 1:(nrow(P_n)-1)) {
+            av <- P_n[i, i] * 0.4
+            P_n[i, i] <- P_n[i, i] - av
+            P_n[i, i+1] <- P_n[i, i+1] + av
+            P_n[i, ] <- P_n[i, ] / sum(P_n[i, ])
+          }
+          sim_nudge <- r$sim_base
+          for (j in 2:nrow(sim_nudge)) {
+            sim_nudge[j, ] <- sim_nudge[j-1, ] %*% P_n
+          }
+          results_list[[g]]$sim_nudge <- sim_nudge
+        }
+      }
+      
       rv$results <- results_list
       
-      # [CORREGIDO] Añadir columna I_Markov_H10 y Alpha
       results_df <- do.call(rbind, lapply(results_list, function(r) {
         data.frame(
           Grupo = r$grupo,
@@ -568,7 +1135,8 @@ server <- function(input, output, session) {
         markov_var = input$markov_var,
         results = results_df,
         results_list = results_list,
-        threshold = input$threshold
+        threshold = input$threshold,
+        dominio = rv$dominio
       )
       
       showNotification(paste("MPCS ejecutado correctamente para", nrow(results_df), "grupos."), type = "message")
@@ -578,19 +1146,23 @@ server <- function(input, output, session) {
   # ==========================================================================
   # FUNCIONES PARA GRÁFICOS
   # ==========================================================================
-  generate_plots <- function(data, graph_vars, markov_var, results, results_list, threshold) {
+  generate_plots <- function(data, graph_vars, markov_var, results, results_list, threshold, dominio = "salud") {
     p_graph <- NULL
     p_states <- NULL
     p_markov <- NULL
     p_rank <- NULL
+    p_arbol <- NULL
+    p_juego <- NULL
     
     if (is.null(data) || nrow(data) == 0 || is.null(results) || nrow(results) == 0) {
-      return(list(graph = NULL, states = NULL, markov = NULL, rank = NULL))
+      return(list(graph = NULL, states = NULL, markov = NULL, rank = NULL, 
+                  arbol = NULL, juego = NULL))
     }
     
     first_group <- results$Grupo[1]
     r <- results_list[[as.character(first_group)]]
     
+    # --- Grafo ---
     if (!is.null(r$graph) && vcount(r$graph) > 0) {
       V(r$graph)$color <- ifelse(V(r$graph)$name == r$nodo_optimo, "#C0392B", "#F0DFC0")
       V(r$graph)$size <- ifelse(V(r$graph)$name == r$nodo_optimo, 25, 15)
@@ -603,6 +1175,7 @@ server <- function(input, output, session) {
       }
     }
     
+    # --- Distribución de estados ---
     if (!is.null(markov_var) && markov_var %in% names(data)) {
       p_states <- function() {
         if (!"Group" %in% names(data)) data$Group <- "Global"
@@ -619,6 +1192,7 @@ server <- function(input, output, session) {
       }
     }
     
+    # --- Ranking ---
     if (!is.null(results) && nrow(results) > 0) {
       p_rank <- function() {
         ggplot(results, aes(x = reorder(Grupo, I_MPCS), y = I_MPCS, fill = Tipo_Nudge)) +
@@ -633,70 +1207,51 @@ server <- function(input, output, session) {
       }
     }
     
+    # --- Trayectorias de Markov ---
     p_markov <- function() {
-      r <- results_list[[as.character(first_group)]]
-      
       if (!is.null(r$sim_base) && nrow(r$sim_base) > 0) {
-        m <- ncol(r$sim_base)
-        if (m >= 2) {
-          adh_base <- r$sim_base[, m] + r$sim_base[, max(1, m-1)]
-          t <- 1:length(adh_base)
-          
-          P_n <- r$markov_mat
-          if (!is.null(P_n)) {
-            for (i in 1:(nrow(P_n)-1)) {
-              av <- P_n[i, i] * 0.4
-              P_n[i, i] <- P_n[i, i] - av
-              P_n[i, i+1] <- P_n[i, i+1] + av
-              P_n[i, ] <- P_n[i, ] / sum(P_n[i, ])
-            }
-            sim_nudge <- r$sim_base
-            for (j in 2:nrow(sim_nudge)) {
-              sim_nudge[j, ] <- sim_nudge[j-1, ] %*% P_n
-            }
-            adh_nudge <- sim_nudge[, m] + sim_nudge[, max(1, m-1)]
-          } else {
-            adh_nudge <- adh_base * 1.3
-          }
-          
-          df <- data.frame(
-            Tiempo = c(t, t),
-            Adherencia = c(adh_base, adh_nudge),
-            Escenario = rep(c("Sin nudge", "Con nudge"), each = length(t))
-          )
-          
-          return(ggplot(df, aes(x = Tiempo, y = Adherencia, color = Escenario)) +
-                   geom_line(linewidth = 1.2) + 
-                   geom_hline(yintercept = 0.50, linetype = "dashed", color = "gray50") +
-                   scale_y_continuous(labels = scales::percent) + 
-                   theme_minimal(base_size = 12) +
-                   scale_color_manual(
-                     values = c("Sin nudge" = "#E74C3C", "Con nudge" = "#2ECC71")
-                   ) +
-                   labs(x = "Período", y = "P(Adherencia ≥ 50%)") + 
-                   theme(legend.position = "bottom"))
-        }
+        return(graficar_trayectorias_markov(
+          r$sim_base, 
+          r$sim_nudge, 
+          colnames(r$sim_base),
+          titulo = paste("Trayectorias de Markov —", first_group),
+          dominio = dominio
+        ))
       }
-      
-      t <- 1:15
-      df <- data.frame(
-        Tiempo = t,
-        Sin_Nudge = pnorm(t, mean = 8, sd = 3),
-        Con_Nudge = pnorm(t, mean = 6, sd = 2.5)
-      ) %>%
-        pivot_longer(-Tiempo, names_to = "Escenario", values_to = "Prob_Adherencia")
-      
-      ggplot(df, aes(x = Tiempo, y = Prob_Adherencia, color = Escenario)) +
-        geom_line(linewidth = 1.2) + 
-        geom_hline(yintercept = 0.50, linetype = "dashed", color = "gray50") +
-        scale_y_continuous(labels = scales::percent) + 
-        theme_minimal(base_size = 12) +
-        scale_color_manual(values = c("Sin_Nudge" = "#E74C3C", "Con_Nudge" = "#2ECC71")) +
-        labs(x = "Período", y = "P(Adherencia ≥ 50%)") + 
-        theme(legend.position = "bottom")
+      return(ggplot() + theme_void() + 
+               annotate("text", x = 0.5, y = 0.5, label = "No hay datos para trayectorias"))
     }
     
-    return(list(graph = p_graph, states = p_states, markov = p_markov, rank = p_rank))
+    # --- Árbol de Markov ---
+    p_arbol <- function() {
+      if (!is.null(r$markov_mat)) {
+        estados <- if (!is.null(r$estados)) r$estados else colnames(r$markov_mat)
+        return(graficar_arbol_markov(
+          r$markov_mat, 
+          estados,
+          umbral_prob = 0.05,
+          titulo = paste("Árbol de Transición —", first_group)
+        ))
+      }
+      return(ggplot() + theme_void() + 
+               annotate("text", x = 0.5, y = 0.5, label = "No hay datos para árbol de Markov"))
+    }
+    
+    # --- Juego evolutivo ---
+    p_juego <- function() {
+      if (!is.null(r$alpha)) {
+        return(graficar_juego_evolutivo(
+          alpha = r$alpha,
+          p_star = r$I_juegos,
+          titulo = paste("Dinámica Replicadora —", first_group)
+        ))
+      }
+      return(ggplot() + theme_void() + 
+               annotate("text", x = 0.5, y = 0.5, label = "No hay datos para teoría de juegos"))
+    }
+    
+    return(list(graph = p_graph, states = p_states, markov = p_markov, rank = p_rank,
+                arbol = p_arbol, juego = p_juego))
   }
   
   # ==========================================================================
@@ -737,6 +1292,22 @@ server <- function(input, output, session) {
     if (!is.null(rv$plots$rank)) rv$plots$rank() else {
       ggplot() + theme_void() + 
         annotate("text", x = 0.5, y = 0.5, label = "No se pudo generar el gráfico.")
+    }
+  })
+  
+  output$plot_arbol_markov <- renderPlot({
+    req(rv$plots)
+    if (!is.null(rv$plots$arbol)) rv$plots$arbol() else {
+      ggplot() + theme_void() + 
+        annotate("text", x = 0.5, y = 0.5, label = "No se pudo generar el árbol de Markov.")
+    }
+  })
+  
+  output$plot_juego_evolutivo <- renderPlot({
+    req(rv$plots)
+    if (!is.null(rv$plots$juego)) rv$plots$juego() else {
+      ggplot() + theme_void() + 
+        annotate("text", x = 0.5, y = 0.5, label = "No se pudo generar el gráfico de juegos.")
     }
   })
   
@@ -887,20 +1458,35 @@ server <- function(input, output, session) {
     top_group <- rv$results_df[which.max(rv$results_df$I_MPCS), ]
     bottom_group <- rv$results_df[which.min(rv$results_df$I_MPCS), ]
     
+    # Determinar etiquetas según dominio
+    if (rv$dominio == "educacion") {
+      etiqueta_comportamiento <- "participación"
+      etiqueta_nodo <- "variable educativa"
+    } else {
+      etiqueta_comportamiento <- "adherencia"
+      etiqueta_nodo <- "variable de salud"
+    }
+    
     HTML(paste0(
       "<div class='well'>",
       "<p><b>📊 Resumen de resultados</b></p>",
       "<p>Se analizaron <b>", nrow(rv$results_df), " grupos</b> con un total de <b>", 
       sum(rv$results_df$n), " observaciones</b>.</p>",
+      "<p><b>Dominio:</b> ", ifelse(rv$dominio == "educacion", "Educación - Participación en el aula", "Salud - Adherencia a medicamentos"), "</p>",
       "<hr>",
       "<p><b>🔴 Grupo con mayor prioridad:</b> <span style='color:#C0392B;font-weight:bold;'>", 
       top_group$Grupo, "</span> (I_MPCS = ", round(top_group$I_MPCS, 4), ")</p>",
-      "<p>El nodo óptimo para la intervención es <b>", top_group$Nodo_Optimo, "</b>.</p>",
+      "<p>El nodo óptimo para la intervención es <b>", top_group$Nodo_Optimo, "</b> (", etiqueta_nodo, ").</p>",
       "<p>Se recomienda aplicar un <b>", top_group$Tipo_Nudge, 
       "</b> con intensidad k = ", round(top_group$k, 4), ".</p>",
+      "<p><b>Masa crítica estimada:</b> ", round(top_group$I_Juegos * 100, 1), 
+      "% de adoptantes necesarios para que el cambio sea autosostenible.</p>",
       "<hr>",
       "<p><b>🟢 Grupo con menor prioridad:</b> <span style='color:#2ECC71;font-weight:bold;'>", 
       bottom_group$Grupo, "</span> (I_MPCS = ", round(bottom_group$I_MPCS, 4), ")</p>",
+      "<p><b>Recomendación para el docente/profesional:</b> Enfocar los esfuerzos en el grupo con mayor prioridad (", 
+      top_group$Grupo, ") y aplicar un nudge de tipo <b>", top_group$Tipo_Nudge, 
+      "</b> con intensidad ", round(top_group$k * 100, 1), "%.</p>",
       "</div>"
     ))
   })
@@ -953,6 +1539,7 @@ server <- function(input, output, session) {
         "<h1>📊 Reporte del MPCS</h1>",
         "<p><b>Fecha de generación:</b> ", format(Sys.Date(), "%d de %B de %Y"), 
         " a las ", format(Sys.time(), "%H:%M"), "</p>",
+        "<p><b>Dominio:</b> ", ifelse(rv$dominio == "educacion", "Educación - Participación en el aula", "Salud - Adherencia a medicamentos"), "</p>",
         "<hr>",
         "<h2>📋 1. Resumen de resultados</h2>",
         "<p><b>Grupos analizados:</b> ", nrow(rv$results_df), "</p>",
@@ -997,10 +1584,11 @@ server <- function(input, output, session) {
         "<li><b>Nodo óptimo de intervención:</b> ", top_group$Nodo_Optimo, "</li>",
         "<li><b>Intensidad recomendada (k):</b> ", round(top_group$k, 4), "</li>",
         "<li><b>Tipo de nudge recomendado:</b> <b>", top_group$Tipo_Nudge, "</b></li>",
+        "<li><b>Masa crítica:</b> ", round(top_group$I_Juegos * 100, 1), "% de adoptantes necesarios</li>",
         "</ul>",
         "</div>",
         "<h2>📚 4. Citación</h2>",
-        "<p>MPCS: A Predictive Model of Systemic Behavioral Change... (Autor, año).</p>",
+        "<p>MPCS: A method for the systematic design of behavioral nudges... (Zela Llanque, 2026).</p>",
         "<div class='footer'>",
         "<p>Reporte generado automáticamente por <b>MPCS Calculator</b></p>",
         "<p>Repositorio: <a href='https://github.com/Izela-meth/MPCS_APP' target='_blank'>",
@@ -1055,7 +1643,7 @@ ui <- tagList(
     "MPCS Calculator v1.0 — Desarrollado con ❤️ por el equipo MPCS | ",
     tags$a(href = "https://github.com/Izela-meth/MPCS_APP", target = "_blank", "GitHub"),
     " | ",
-    tags$a(href = "mailto:contacto@mpcs.com", "Contacto")
+    tags$a(href = "mailto:izela@unsa.edu.pe", "Contacto")
   )
 )
 
