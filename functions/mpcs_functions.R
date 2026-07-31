@@ -4,23 +4,6 @@
 # Este archivo contiene todas las funciones matemáticas del Modelo Predictivo
 # de Cambio Conductual por Sistemas (MPCS)
 # ============================================================================
-# Funciones incluidas:
-#   1. calcular_grafo()          - Construye el grafo y calcula centralidades
-#   2. calcular_markov()         - Estima cadena de Markov (Opción B: H=10)
-#   3. calcular_juegos()         - Calcula masa crítica (dinámica con α)
-#   4. calcular_indice()         - Calcula Índice MPCS y tipo de nudge
-#   5. aplicar_nudge()           - Aplica nudge a matriz de transición
-#   6. generar_demo_data()       - Genera datos de salud (demostración)
-#   7. generar_datos_aula()      - Genera datos de educación (demostración)
-#   8. graficar_arbol_markov()   - Árbol de transición de Markov
-#   9. graficar_juego_evolutivo() - Dinámica replicadora (teoría de juegos)
-#  10. graficar_trayectorias_markov() - Trayectorias de Markov mejoradas
-#  11. format_report()           - Formatea resultados para reporte
-#  12. validar_datos()           - Valida la estructura de los datos
-#  13. analisis_sensibilidad()   - Análisis de sensibilidad de pesos
-#  14. grafico_sensibilidad()    - Gráfico de sensibilidad
-#  15. resumen_sensibilidad()    - Resumen textual de sensibilidad
-# ============================================================================
 
 # ============================================================================
 # 1. calcular_grafo — Construye el grafo conductual y calcula centralidades
@@ -30,12 +13,11 @@
 #'
 #' @param datos data.frame con las variables del sistema
 #' @param variables vector con nombres de columnas a incluir en el grafo
-#' @param umbral valor mínimo de correlación para incluir aristas (defecto: 0.10)
-#' @return lista con grafo, centralidad, nodo óptimo e índice de impacto
+#' @param umbral valor minimo de correlacion para incluir aristas (defecto: 0.10)
+#' @return lista con grafo, centralidad, nodo optimo e indice de impacto
 #' @export
 calcular_grafo <- function(datos, variables, umbral = 0.10) {
   
-  # --- Validaciones ---
   if (missing(datos) || missing(variables)) {
     warning("Se requieren datos y variables")
     return(list(
@@ -47,17 +29,14 @@ calcular_grafo <- function(datos, variables, umbral = 0.10) {
   }
   
   if (length(variables) < 3) {
-    warning("Se recomiendan al menos 5 variables para un grafo estable. Se usarán ", length(variables), " variables.")
+    warning("Se recomiendan al menos 5 variables para un grafo estable. Se usaran ", length(variables), " variables.")
   }
   
-  # --- Seleccionar y limpiar datos ---
   df <- datos[, variables, drop = FALSE]
-  
-  # Eliminar columnas con > 50% de valores faltantes
   df <- df[, colSums(is.na(df)) < nrow(df) * 0.5, drop = FALSE]
   
   if (ncol(df) < 3) {
-    warning("Menos de 3 variables válidas después de limpiar datos faltantes")
+    warning("Menos de 3 variables validas despues de limpiar datos faltantes")
     return(list(
       graph = NULL,
       centralidad = NULL,
@@ -66,11 +45,10 @@ calcular_grafo <- function(datos, variables, umbral = 0.10) {
     ))
   }
   
-  # --- Matriz de correlación ---
   mat_cor <- tryCatch({
     cor(df, use = "pairwise.complete.obs", method = "spearman")
   }, error = function(e) {
-    warning("Error al calcular la matriz de correlación: ", e$message)
+    warning("Error al calcular la matriz de correlacion: ", e$message)
     return(NULL)
   })
   
@@ -83,7 +61,6 @@ calcular_grafo <- function(datos, variables, umbral = 0.10) {
     ))
   }
   
-  # --- Crear aristas ---
   aristas <- which(abs(mat_cor) > umbral & mat_cor != 1, arr.ind = TRUE)
   
   if (nrow(aristas) == 0) {
@@ -115,7 +92,6 @@ calcular_grafo <- function(datos, variables, umbral = 0.10) {
     ))
   }
   
-  # --- Crear grafo ---
   g <- tryCatch({
     igraph::graph_from_data_frame(aristas_df, directed = FALSE)
   }, error = function(e) {
@@ -132,7 +108,6 @@ calcular_grafo <- function(datos, variables, umbral = 0.10) {
     ))
   }
   
-  # --- Calcular centralidades ---
   grado_max <- max(igraph::degree(g))
   
   centr <- data.frame(
@@ -145,7 +120,6 @@ calcular_grafo <- function(datos, variables, umbral = 0.10) {
     ) %>%
     dplyr::arrange(dplyr::desc(Impacto))
   
-  # --- Retornar resultados ---
   return(list(
     graph = g,
     centralidad = centr,
@@ -155,21 +129,20 @@ calcular_grafo <- function(datos, variables, umbral = 0.10) {
 }
 
 # ============================================================================
-# 2. calcular_markov — Estima cadena de Markov (OPCIÓN B: HORIZONTE FIJO H=10)
+# 2. calcular_markov — Estima cadena de Markov (OPCION B: HORIZONTE FIJO H=10)
 # ============================================================================
 
-#' Calcular cadena de Markov y convergencia (Opción B)
+#' Calcular cadena de Markov y convergencia (Opcion B)
 #'
 #' @param estados vector con los estados de cada individuo
 #' @param orden_estados vector con el orden progresivo de estados (opcional)
-#' @param umbral_objetivo proporción para considerar convergencia (defecto: 0.50)
-#' @param horizonte número de períodos para proyectar (defecto: 10)
-#' @return lista con matriz P, simulación, índice de Markov y tiempo de referencia
+#' @param umbral_objetivo proporcion para considerar convergencia (defecto: 0.50)
+#' @param horizonte numero de periodos para proyectar (defecto: 10)
+#' @return lista con matriz P, simulacion, indice de Markov y tiempo de referencia
 #' @export
 calcular_markov <- function(estados, orden_estados = NULL, 
                             umbral_objetivo = 0.50, horizonte = 10) {
   
-  # --- Validaciones ---
   if (missing(estados)) {
     warning("Se requiere el vector de estados")
     return(list(
@@ -181,7 +154,6 @@ calcular_markov <- function(estados, orden_estados = NULL,
     ))
   }
   
-  # Limpiar datos
   estados_clean <- estados[!is.na(estados) & estados != ""]
   
   if (length(estados_clean) < 30) {
@@ -195,21 +167,16 @@ calcular_markov <- function(estados, orden_estados = NULL,
     ))
   }
   
-  # --- Determinar estados únicos ---
   estados_unicos <- unique(estados_clean)
   
-  # Si no se especifica orden, intentar ordenar automáticamente
   if (is.null(orden_estados)) {
-    # Intentar ordenar como E1, E2, E3, ...
     if (all(grepl("^E[0-9]+$", estados_unicos))) {
       orden_estados <- estados_unicos[order(as.numeric(gsub("E", "", estados_unicos)))]
     } else {
-      # Ordenar por frecuencia (de más a menos común)
       freq <- table(estados_clean)
       orden_estados <- names(sort(freq, decreasing = TRUE))
     }
   } else {
-    # Verificar que todos los estados estén en el orden
     faltantes <- setdiff(estados_unicos, orden_estados)
     if (length(faltantes) > 0) {
       orden_estados <- c(orden_estados, faltantes)
@@ -229,7 +196,6 @@ calcular_markov <- function(estados, orden_estados = NULL,
     ))
   }
   
-  # --- Calcular distribución actual ---
   freq <- table(estados_clean)
   dist_actual <- rep(0, m)
   names(dist_actual) <- orden_estados
@@ -240,21 +206,13 @@ calcular_markov <- function(estados, orden_estados = NULL,
     }
   }
   
-  # --- Construir matriz de transición genérica ---
-  # En ausencia de datos longitudinales, se usan supuestos de progresión conservadores
   P <- matrix(0, nrow = m, ncol = m)
   colnames(P) <- orden_estados
   rownames(P) <- orden_estados
   
   for (i in 1:(m-1)) {
-    # Probabilidad de avanzar al siguiente estado
-    # Mayor probabilidad de avance desde estados tempranos
     prob_avance <- 0.30 + 0.20 * (1 - i/m)
-    
-    # Probabilidad de permanecer
     prob_quedarse <- 0.50 - 0.15 * (i/m)
-    
-    # Probabilidad de retroceder (pequeña)
     prob_retroceso <- 0.10 * (1 - i/m)
     
     P[i, i] <- prob_quedarse
@@ -264,7 +222,6 @@ calcular_markov <- function(estados, orden_estados = NULL,
       P[i, i-1] <- prob_retroceso
     }
     
-    # Distribuir el resto entre otros estados
     resto <- 1 - sum(P[i, ])
     if (resto > 0) {
       otros <- setdiff(1:m, c(i, i+1, if (i > 1) i-1 else NULL))
@@ -274,14 +231,11 @@ calcular_markov <- function(estados, orden_estados = NULL,
     }
   }
   
-  # Último estado: alta permanencia (la conducta está consolidada)
   P[m, m] <- 0.85
   P[m, 1:(m-1)] <- (1 - 0.85) / (m - 1)
   
-  # Normalizar filas para asegurar que suman 1
   P <- P / rowSums(P)
   
-  # --- Simular cadena de Markov ---
   simular <- function(P, v0, n = 30) {
     m <- nrow(P)
     dist <- matrix(0, n + 1, m)
@@ -295,27 +249,16 @@ calcular_markov <- function(estados, orden_estados = NULL,
   
   sim_base <- simular(P, dist_actual)
   
-  # ============================================================
-  # [OPCIÓN B] I_Markov = adherencia en horizonte fijo H
-  # ============================================================
-  # En lugar de medir el tiempo en llegar al umbral, medimos el
-  # progreso alcanzado en el período H (por defecto H=10)
-  # ============================================================
-  
   idx_h <- min(horizonte + 1, nrow(sim_base))
   
   if (m >= 2) {
-    # La adherencia es la suma de los dos últimos estados (control + adherencia plena)
     score <- sim_base[idx_h, m] + sim_base[idx_h, max(1, m-1)]
   } else {
     score <- sim_base[idx_h, m]
   }
   
-  # Asegurar que score esté en [0,1]
   score <- max(0, min(1, score))
   
-  # --- T_base se mantiene para referencia (pero ya no se usa para I_Markov) ---
-  # Se calcula el tiempo en alcanzar el umbral (para información adicional)
   if (m >= 2) {
     objetivo <- sim_base[, m] + sim_base[, max(1, m-1)]
     T_base <- which(objetivo >= umbral_objetivo)[1]
@@ -326,7 +269,6 @@ calcular_markov <- function(estados, orden_estados = NULL,
     T_base <- 10
   }
   
-  # --- Retornar resultados ---
   return(list(
     mat = P,
     dist_actual = dist_actual,
@@ -338,40 +280,32 @@ calcular_markov <- function(estados, orden_estados = NULL,
 }
 
 # ============================================================================
-# 3. calcular_juegos — Calcula masa crítica (TEORÍA DE JUEGOS DINÁMICA CON α)
+# 3. calcular_juegos — Calcula masa critica (TEORIA DE JUEGOS DINAMICA CON α)
 # ============================================================================
  
-#' Calcular teoría de juegos y masa crítica (dinámica con α)
+#' Calcular teoria de juegos y masa critica (dinamica con α)
 #'
-#' @param P matriz de transición de Markov (opcional, no se usa)
-#' @param R_factor factor de recursos (defecto: 0.65) — OBSOLETO, se mantiene por compatibilidad
+#' @param P matriz de transicion de Markov (opcional, no se usa)
+#' @param R_factor factor de recursos (defecto: 0.65) — OBSOLETO
 #' @param alpha indicador de acceso a salud (0-1). Si no se proporciona, usa 0.60 por defecto.
-#' @return lista con masa crítica e índice
+#' @return lista con masa critica e indice
 #' @export
 calcular_juegos <- function(P = NULL, R_factor = 0.65, alpha = NULL) {
   
-  # --- Si no se proporciona alpha, usar valor por defecto ---
   if (is.null(alpha) || is.na(alpha)) {
     alpha <- 0.60
   }
   
-  # --- Matriz de pagos DINÁMICA (depende de α) ---
-  # Estos valores representan la interacción social entre adoptantes (A) y resistentes (R)
-  a_AA <- 2.0   # Refuerzo mutuo entre adoptantes
-  a_AR <- -(0.5 + 0.5 * (1 - alpha))  # Presión social negativa sobre el adoptante aislado
-  a_RA <- 0.5 + 0.5 * alpha           # El resistente se beneficia del ejemplo ajeno
-  a_RR <- 0.5 + 0.5 * (1 - alpha)     # Refuerzo mutuo de la inacción
+  a_AA <- 2.0
+  a_AR <- -(0.5 + 0.5 * (1 - alpha))
+  a_RA <- 0.5 + 0.5 * alpha
+  a_RR <- 0.5 + 0.5 * (1 - alpha)
   
-  # --- Calcular masa crítica (p*) ---
-  # p* es el umbral mínimo de adoptantes para que la conducta sea auto-sostenible.
-  # Ecuación: p* = (a_RR - a_AR) / (a_AA - a_AR - a_RA + a_RR)
   numerador <- a_RR - a_AR
   denominador <- a_AA - a_AR - a_RA + a_RR
   p_star <- numerador / denominador
   p_star <- max(0, min(1, p_star))
   
-  # --- Índice de juegos ---
-  # I_Juegos = p*
   score <- p_star
   
   return(list(
@@ -386,14 +320,14 @@ calcular_juegos <- function(P = NULL, R_factor = 0.65, alpha = NULL) {
 }
 
 # ============================================================================
-# 4. calcular_indice — Calcula Índice MPCS y tipo de nudge
+# 4. calcular_indice — Calcula Indice MPCS y tipo de nudge
 # ============================================================================
 
-#' Calcular Índice MPCS y tipo de nudge
+#' Calcular Indice MPCS y tipo de nudge
 #'
-#' @param I_grafo índice del módulo de grafos
-#' @param I_markov índice del módulo de Markov (Opción B: H=10)
-#' @param I_juegos índice del módulo de juegos (dinámico con α)
+#' @param I_grafo indice del modulo de grafos
+#' @param I_markov indice del modulo de Markov (Opcion B: H=10)
+#' @param I_juegos indice del modulo de juegos (dinamico con α)
 #' @param w1 ponderador para grafos (defecto: 0.35)
 #' @param w2 ponderador para Markov (defecto: 0.40)
 #' @param w3 ponderador para juegos (defecto: 0.25)
@@ -404,28 +338,19 @@ calcular_indice <- function(I_grafo, I_markov, I_juegos,
                             w1 = 0.35, w2 = 0.40, w3 = 0.25,
                             R_factor = 0.65) {
   
-  # --- Verificar ponderadores ---
-  # Asegurar que los ponderadores suman 1
   total <- w1 + w2 + w3
   if (abs(total - 1) > 0.01) {
-    warning("Los ponderadores no suman 1. Se normalizarán.")
+    warning("Los ponderadores no suman 1. Se normalizaran.")
     w1 <- w1 / total
     w2 <- w2 / total
     w3 <- w3 / total
   }
   
-  # --- Calcular I_MPCS ---
   I_MPCS <- w1 * I_grafo + w2 * I_markov + w3 * I_juegos
-  
-  # Asegurar que I_MPCS esté en [0, 1]
   I_MPCS <- max(0, min(1, I_MPCS))
   
-  # --- Calcular k (intensidad del nudge) ---
-  # k se calcula como una función del I_MPCS y el factor de recursos
-  # Fórmula: k = min(1, I_MPCS * R_factor * 1.5)
   k <- min(1, I_MPCS * R_factor * 1.5)
   
-  # --- Determinar tipo de nudge ---
   tipo <- dplyr::case_when(
     k < 0.25 ~ "Informational",
     k < 0.50 ~ "Structural",
@@ -433,7 +358,6 @@ calcular_indice <- function(I_grafo, I_markov, I_juegos,
     TRUE ~ "Systemic multi-nudge"
   )
   
-  # --- Retornar resultados ---
   return(list(
     I_MPCS = I_MPCS,
     k = k,
@@ -442,34 +366,31 @@ calcular_indice <- function(I_grafo, I_markov, I_juegos,
 }
 
 # ============================================================================
-# 5. aplicar_nudge — Aplica nudge a la matriz de transición
+# 5. aplicar_nudge — Aplica nudge a la matriz de transicion
 # ============================================================================
 
-#' Aplicar nudge a la matriz de transición de Markov
+#' Aplicar nudge a la matriz de transicion de Markov
 #'
-#' @param P matriz de transición original
+#' @param P matriz de transicion original
 #' @param k intensidad del nudge (0-1)
-#' @return matriz de transición modificada
+#' @return matriz de transicion modificada
 #' @export
 aplicar_nudge <- function(P, k) {
   
-  # --- Validaciones ---
   if (is.null(P) || !is.matrix(P)) {
-    warning("Se requiere una matriz de transición válida")
+    warning("Se requiere una matriz de transicion valida")
     return(NULL)
   }
   
   if (k < 0 || k > 1) {
-    warning("k debe estar entre 0 y 1. Se usará k = 0.4")
+    warning("k debe estar entre 0 y 1. Se usara k = 0.4")
     k <- 0.4
   }
   
-  # --- Aplicar nudge ---
   P_n <- P
   m <- nrow(P)
   
   for (i in 1:(m-1)) {
-    # Transferir probabilidad desde inercia al avance
     av <- P[i, i] * k
     P_n[i, i] <- P[i, i] - av
     P_n[i, i+1] <- P[i, i+1] + av
@@ -480,14 +401,14 @@ aplicar_nudge <- function(P, k) {
 }
 
 # ============================================================================
-# 6. generar_demo_data — Genera datos de salud (demostración)
+# 6. generar_demo_data — Genera datos de salud (demostracion)
 # ============================================================================
 
-#' Generar datos de demostración (salud - ENDES demo)
+#' Generar datos de demostracion (salud - ENDES demo)
 #'
-#' @param n número de observaciones
+#' @param n numero de observaciones
 #' @param seed semilla para reproducibilidad
-#' @return data.frame con datos de demostración
+#' @return data.frame con datos de demostracion
 #' @export
 generar_demo_data <- function(n = 1000, seed = 123) {
   
@@ -524,14 +445,14 @@ generar_demo_data <- function(n = 1000, seed = 123) {
 }
 
 # ============================================================================
-# 7. generar_datos_aula — Genera datos de educación (demostración)
+# 7. generar_datos_aula — Genera datos de educacion (demostracion)
 # ============================================================================
 
-#' Generar datos de demostración (educación - participación en aula)
+#' Generar datos de demostracion (educacion - participacion en aula)
 #'
-#' @param n número de estudiantes
+#' @param n numero de estudiantes
 #' @param seed semilla para reproducibilidad
-#' @return data.frame con datos de demostración
+#' @return data.frame con datos de demostracion
 #' @export
 generar_datos_aula <- function(n = 200, seed = 456) {
   
@@ -564,7 +485,7 @@ generar_datos_aula <- function(n = 200, seed = 456) {
   
   teacher_encouragement <- round(pmin(10, pmax(0, rnorm(n, mean = 5 + 1.5 * (estados_base - 1), sd = 2))), 1)
   
-  grupo <- sample(c("Sección A", "Sección B", "Sección C"), n, replace = TRUE, prob = c(0.40, 0.35, 0.25))
+  grupo <- sample(c("Seccion A", "Seccion B", "Seccion C"), n, replace = TRUE, prob = c(0.40, 0.35, 0.25))
   
   data.frame(
     ID = 1:n,
@@ -586,46 +507,63 @@ generar_datos_aula <- function(n = 200, seed = 456) {
 }
 
 # ============================================================================
-# 8. graficar_arbol_markov — Árbol de transición de Markov
+# 8. graficar_arbol_markov — Arbol de transicion de Markov (CORREGIDO)
 # ============================================================================
 
-#' Graficar árbol de transición de Markov
+#' Graficar arbol de transicion de Markov
 #'
-#' @param P matriz de transición (m x m)
+#' @param P matriz de transicion (m x m)
 #' @param estados vector con nombres de estados
-#' @param umbral_prob probabilidad mínima para mostrar una flecha (default: 0.01)
-#' @param titulo título del gráfico
+#' @param umbral_prob probabilidad minima para mostrar una flecha (default: 0.05)
+#' @param titulo titulo del grafico
 #' @return objeto ggplot
 #' @export
-graficar_arbol_markov <- function(P, estados, umbral_prob = 0.01, 
-                                  titulo = "Árbol de Transición de Markov") {
+graficar_arbol_markov <- function(P, estados = NULL, umbral_prob = 0.05, 
+                                  titulo = "Arbol de Transicion de Markov") {
   
-  if (is.null(P) || is.null(estados) || nrow(P) < 2) {
+  if (!requireNamespace("ggplot2", quietly = TRUE)) {
+    stop("Se requiere el paquete ggplot2")
+  }
+  if (!requireNamespace("igraph", quietly = TRUE)) {
+    stop("Se requiere el paquete igraph")
+  }
+  
+  if (is.null(P) || nrow(P) < 2) {
     return(ggplot2::ggplot() + ggplot2::theme_void() + 
-             ggplot2::annotate("text", x = 0.5, y = 0.5, label = "No hay datos para el árbol de Markov"))
+             ggplot2::annotate("text", x = 0.5, y = 0.5, 
+                              label = "No hay datos para el arbol de Markov",
+                              size = 5, color = "#7F8C8D"))
   }
   
   m <- nrow(P)
   
-  if (is.null(colnames(P))) {
-    estados <- paste0("E", 1:m)
+  # --- OBTENER NOMBRES DE ESTADOS ---
+  if (!is.null(estados) && length(estados) == m) {
+    estados_nombres <- estados
+  } else if (!is.null(colnames(P)) && all(colnames(P) != "")) {
+    estados_nombres <- colnames(P)
   } else {
-    estados <- colnames(P)
+    estados_nombres <- paste0("E", 1:m)
   }
   
+  # --- Limpiar nombres para mostrar ---
+  estados_mostrar <- estados_nombres
+  for (i in 1:length(estados_mostrar)) {
+    if (nchar(estados_mostrar[i]) > 12) {
+      estados_mostrar[i] <- substr(estados_mostrar[i], 1, 10)
+    }
+  }
+  
+  # --- Crear aristas con transiciones relevantes ---
   aristas <- data.frame()
   for (i in 1:m) {
     for (j in 1:m) {
       if (P[i, j] >= umbral_prob && i != j) {
-        nombre_from <- estados[i]
-        nombre_to <- estados[j]
-        if (nchar(nombre_from) > 15) nombre_from <- substr(nombre_from, 1, 12)
-        if (nchar(nombre_to) > 15) nombre_to <- substr(nombre_to, 1, 12)
-        
         aristas <- rbind(aristas, data.frame(
-          from = nombre_from,
-          to = nombre_to,
-          prob = round(P[i, j] * 100, 1)
+          from = estados_mostrar[i],
+          to = estados_mostrar[j],
+          prob = round(P[i, j] * 100, 1),
+          prob_raw = P[i, j]
         ))
       }
     }
@@ -633,16 +571,26 @@ graficar_arbol_markov <- function(P, estados, umbral_prob = 0.01,
   
   if (nrow(aristas) == 0) {
     return(ggplot2::ggplot() + ggplot2::theme_void() + 
-             ggplot2::annotate("text", x = 0.5, y = 0.5, label = "No hay transiciones significativas"))
+             ggplot2::annotate("text", x = 0.5, y = 0.5, 
+                              label = paste0("No hay transiciones >= ", round(umbral_prob*100, 0), "%"),
+                              size = 5, color = "#7F8C8D"))
   }
   
-  g <- igraph::graph_from_data_frame(aristas, directed = TRUE)
+  # --- Crear grafo ---
+  g <- igraph::graph_from_data_frame(aristas[, c("from", "to")], directed = TRUE)
   
+  # --- Layout ---
   tryCatch({
     layout <- igraph::layout_as_tree(g, root = 1, circular = FALSE)
   }, error = function(e) {
-    layout <- igraph::layout_with_fr(g)
+    layout <- igraph::layout_with_fr(g, niter = 1000)
   })
+  
+  # --- Escalar layout ---
+  if (nrow(layout) > 0) {
+    layout[, 1] <- scale(layout[, 1]) * 2.5
+    layout[, 2] <- scale(layout[, 2]) * 2.5
+  }
   
   coords <- data.frame(
     x = layout[, 1],
@@ -650,6 +598,7 @@ graficar_arbol_markov <- function(P, estados, umbral_prob = 0.01,
     name = igraph::V(g)$name
   )
   
+  # --- Crear edge_data ---
   edge_data <- data.frame()
   for (i in 1:nrow(aristas)) {
     from_idx <- which(coords$name == aristas$from[i])
@@ -660,38 +609,54 @@ graficar_arbol_markov <- function(P, estados, umbral_prob = 0.01,
         y = coords$y[from_idx],
         xend = coords$x[to_idx],
         yend = coords$y[to_idx],
-        prob = aristas$prob[i]
+        prob = aristas$prob[i],
+        prob_raw = aristas$prob_raw[i]
       ))
     }
   }
   
   if (nrow(edge_data) == 0) {
     return(ggplot2::ggplot() + ggplot2::theme_void() + 
-             ggplot2::annotate("text", x = 0.5, y = 0.5, label = "Error al generar el árbol"))
+             ggplot2::annotate("text", x = 0.5, y = 0.5, 
+                              label = "Error al generar el arbol",
+                              size = 5, color = "#7F8C8D"))
   }
   
+  # --- Tama�o de nodos segun grado ---
+  node_degrees <- table(c(as.character(aristas$from), as.character(aristas$to)))
+  node_size <- ifelse(coords$name %in% names(node_degrees), 
+                      18 + node_degrees[coords$name] * 2, 
+                      20)
+  node_size <- pmin(30, pmax(16, node_size))
+  
+  # --- Graficar ---
   p <- ggplot2::ggplot() +
-    ggplot2::geom_segment(
+    ggplot2::geom_curve(
       data = edge_data,
       aes(x = x, y = y, xend = xend, yend = yend),
-      arrow = arrow(length = unit(0.25, "cm"), type = "closed"),
+      curvature = 0.15,
+      arrow = arrow(length = unit(0.2, "cm"), type = "closed"),
       color = "#2C3E50",
-      linewidth = 0.8,
-      alpha = 0.6
+      linewidth = 0.7,
+      alpha = 0.5
     ) +
-    ggplot2::geom_text(
+    ggplot2::geom_label(
       data = edge_data,
-      aes(x = (x + xend)/2, y = (y + yend)/2 + 0.05, 
+      aes(x = (x + xend)/2, y = (y + yend)/2 + 0.08, 
           label = paste0(prob, "%")),
       size = 3.5,
-      color = "#E74C3C",
-      fontface = "bold"
+      fill = "white",
+      color = "#C0392B",
+      fontface = "bold",
+      label.size = 0.3,
+      label.padding = unit(0.15, "lines"),
+      alpha = 0.9
     ) +
     ggplot2::geom_point(
       data = coords,
       aes(x = x, y = y),
-      size = 20,
-      color = "#3498DB",
+      size = node_size,
+      color = "#2C3E50",
       fill = "#D6EAF8",
       shape = 21,
       stroke = 1.5
@@ -699,13 +664,13 @@ graficar_arbol_markov <- function(P, estados, umbral_prob = 0.01,
     ggplot2::geom_text(
       data = coords,
       aes(x = x, y = y, label = name),
-      size = 3.5,
+      size = 4,
       fontface = "bold",
       color = "#1A3A5C"
     ) +
     ggplot2::labs(
       title = titulo,
-      subtitle = paste0("Transiciones con probabilidad ≥ ", round(umbral_prob * 100, 0), "%"),
+      subtitle = paste0("Transiciones con probabilidad >= ", round(umbral_prob * 100, 0), "%"),
       x = "", y = ""
     ) +
     ggplot2::theme_minimal(base_size = 11) +
@@ -713,26 +678,34 @@ graficar_arbol_markov <- function(P, estados, umbral_prob = 0.01,
       axis.text = element_blank(),
       axis.ticks = element_blank(),
       panel.grid = element_blank(),
-      plot.title = element_text(face = "bold", size = 13, hjust = 0.5),
-      plot.subtitle = element_text(size = 10, hjust = 0.5, color = "#7F8C8D")
+      plot.title = element_text(face = "bold", size = 14, hjust = 0.5),
+      plot.subtitle = element_text(size = 11, hjust = 0.5, color = "#7F8C8D"),
+      plot.margin = margin(10, 20, 10, 20)
     )
   
   return(p)
 }
 
 # ============================================================================
-# 9. graficar_juego_evolutivo — Dinámica replicadora (teoría de juegos)
+# 9. graficar_juego_evolutivo — Dinamica replicadora (teoria de juegos)
 # ============================================================================
 
-#' Graficar dinámica replicadora (teoría de juegos)
+#' Graficar dinamica replicadora (teoria de juegos)
 #'
 #' @param alpha indicador de contexto (0-1)
-#' @param p_star masa crítica (calculada automáticamente si no se proporciona)
-#' @param titulo título del gráfico
+#' @param p_star masa critica (calculada automaticamente si no se proporciona)
+#' @param titulo titulo del grafico
 #' @return objeto ggplot
 #' @export
 graficar_juego_evolutivo <- function(alpha = 0.60, p_star = NULL, 
-                                     titulo = "Dinámica Replicadora") {
+                                     titulo = "Dinamica Replicadora") {
+  
+  if (!requireNamespace("ggplot2", quietly = TRUE)) {
+    stop("Se requiere el paquete ggplot2")
+  }
+  if (!requireNamespace("patchwork", quietly = TRUE)) {
+    stop("Se requiere el paquete patchwork")
+  }
   
   if (is.na(alpha) || is.null(alpha)) alpha <- 0.60
   
@@ -783,8 +756,8 @@ graficar_juego_evolutivo <- function(alpha = 0.60, p_star = NULL,
     ) +
     labs(
       title = titulo,
-      subtitle = paste0("α = ", round(alpha, 3), " | Masa crítica (p*) = ", round(p_star, 3)),
-      x = "Proporción de adoptantes (p)",
+      subtitle = paste0("α = ", round(alpha, 3), " | Masa critica (p*) = ", round(p_star, 3)),
+      x = "Proporcion de adoptantes (p)",
       y = "Pago esperado",
       color = "Estrategia"
     ) +
@@ -807,9 +780,9 @@ graficar_juego_evolutivo <- function(alpha = 0.60, p_star = NULL,
     scale_y_continuous(labels = scales::number) +
     scale_fill_manual(values = c("#E74C3C", "#2ECC71"), guide = "none") +
     labs(
-      title = "Dinámica Replicadora (dp/dt)",
-      subtitle = "Velocidad de cambio en la proporción de adoptantes",
-      x = "Proporción de adoptantes (p)",
+      title = "Dinamica Replicadora (dp/dt)",
+      subtitle = "Velocidad de cambio en la proporcion de adoptantes",
+      x = "Proporcion de adoptantes (p)",
       y = "dp/dt (tasa de cambio)"
     ) +
     theme_minimal(base_size = 11) +
@@ -820,7 +793,7 @@ graficar_juego_evolutivo <- function(alpha = 0.60, p_star = NULL,
   
   p_combinado <- p1 + p2 + 
     patchwork::plot_annotation(
-      title = paste0("Análisis de Teoría de Juegos - MPCS"),
+      title = paste0("Analisis de Teoria de Juegos - MPCS"),
       subtitle = paste0("α = ", round(alpha, 3), " | p* = ", round(p_star, 3)),
       theme = theme(
         plot.title = element_text(face = "bold", size = 14, hjust = 0.5),
@@ -837,21 +810,33 @@ graficar_juego_evolutivo <- function(alpha = 0.60, p_star = NULL,
 
 #' Graficar trayectorias de Markov mejoradas
 #'
-#' @param sim_base simulación base
-#' @param sim_nudge simulación con nudge (opcional)
+#' @param sim_base simulacion base
+#' @param sim_nudge simulacion con nudge (opcional)
 #' @param estados nombres de los estados
-#' @param titulo título del gráfico
+#' @param titulo titulo del grafico
 #' @param y_label etiqueta del eje Y
 #' @return objeto ggplot
 #' @export
 graficar_trayectorias_markov <- function(sim_base, sim_nudge = NULL, 
                                          estados = NULL, 
                                          titulo = "Trayectorias de Markov",
-                                         y_label = "P(Adopción)") {
+                                         y_label = "Probabilidad de ocupacion") {
+  
+  if (!requireNamespace("ggplot2", quietly = TRUE)) {
+    stop("Se requiere el paquete ggplot2")
+  }
+  if (!requireNamespace("tidyr", quietly = TRUE)) {
+    stop("Se requiere el paquete tidyr")
+  }
+  if (!requireNamespace("RColorBrewer", quietly = TRUE)) {
+    stop("Se requiere el paquete RColorBrewer")
+  }
   
   if (is.null(sim_base)) {
     return(ggplot() + theme_void() + 
-             annotate("text", x = 0.5, y = 0.5, label = "No hay datos para trayectorias"))
+             annotate("text", x = 0.5, y = 0.5, 
+                     label = "No hay datos para trayectorias",
+                     size = 5, color = "#7F8C8D"))
   }
   
   if (is.null(estados)) {
@@ -887,28 +872,42 @@ graficar_trayectorias_markov <- function(sim_base, sim_nudge = NULL,
     values_to = "Probabilidad"
   )
   
+  n_estados <- length(estados)
+  colores <- RColorBrewer::brewer.pal(min(n_estados, 8), "Set1")
+  if (n_estados > 8) {
+    colores <- colorRampPalette(colores)(n_estados)
+  }
+  
   p <- ggplot(df_long, aes(x = Periodo, y = Probabilidad, 
                            color = Estado, linetype = Escenario)) +
-    geom_line(linewidth = 1.1) +
-    geom_point(data = df_long %>% filter(Periodo %% max(1, round(max(df_long$Periodo)/10)) == 0), 
-               size = 1.5, alpha = 0.6) +
-    scale_y_continuous(labels = scales::percent, limits = c(0, 1)) +
-    scale_x_continuous(breaks = seq(0, max(df_long$Periodo), by = max(1, round(max(df_long$Periodo)/5)))) +
-    scale_color_brewer(palette = "Set1") +
+    geom_line(linewidth = 1.2) +
+    scale_y_continuous(
+      labels = scales::percent_format(accuracy = 1), 
+      limits = c(0, 1),
+      breaks = seq(0, 1, by = 0.1)
+    ) +
+    scale_x_continuous(
+      breaks = seq(0, max(df_long$Periodo), by = max(1, round(max(df_long$Periodo)/6)))
+    ) +
+    scale_color_manual(values = colores) +
+    scale_linetype_manual(values = c("Sin nudge" = "solid", "Con nudge" = "dashed")) +
     labs(
       title = titulo,
-      x = "Período",
+      subtitle = "Muestra la proporcion esperada de individuos en cada estado a lo largo del tiempo",
+      x = "Periodo (unidades de tiempo)",
       y = y_label,
-      color = "Estado",
+      color = "Estado conductual",
       linetype = "Escenario"
     ) +
-    theme_minimal(base_size = 12) +
+    theme_minimal(base_size = 13) +
     theme(
       legend.position = "bottom",
       legend.box = "vertical",
-      plot.title = element_text(face = "bold", size = 14, hjust = 0.5),
+      plot.title = element_text(face = "bold", size = 15, hjust = 0.5),
       plot.subtitle = element_text(size = 11, hjust = 0.5, color = "#7F8C8D"),
-      axis.text.x = element_text(angle = 45, hjust = 1)
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      panel.grid.minor = element_blank(),
+      panel.grid.major = element_line(color = "#EAECEE", linewidth = 0.5)
     )
   
   return(p)
@@ -921,7 +920,7 @@ graficar_trayectorias_markov <- function(sim_base, sim_nudge = NULL,
 #' Formatear resultados para reporte
 #'
 #' @param results data.frame con resultados del MPCS
-#' @param plots lista de gráficos generados (opcional)
+#' @param plots lista de graficos generados (opcional)
 #' @return lista formateada para reporte
 #' @export
 format_report <- function(results, plots = NULL) {
@@ -968,9 +967,9 @@ format_report <- function(results, plots = NULL) {
 #' Validar la estructura de los datos de entrada
 #'
 #' @param datos data.frame a validar
-#' @param min_filas número mínimo de filas (defecto: 30)
-#' @param min_vars_num número mínimo de variables numéricas (defecto: 5)
-#' @return lista con resultado de validación
+#' @param min_filas numero minimo de filas (defecto: 30)
+#' @param min_vars_num numero minimo de variables numericas (defecto: 5)
+#' @return lista con resultado de validacion
 #' @export
 validar_datos <- function(datos, min_filas = 30, min_vars_num = 5) {
   
@@ -990,7 +989,7 @@ validar_datos <- function(datos, min_filas = 30, min_vars_num = 5) {
   vars_num <- names(datos)[sapply(datos, is.numeric)]
   if (length(vars_num) < min_vars_num) {
     errores <- c(errores, paste("Se necesitan al menos", min_vars_num, 
-                                "variables numéricas. Actual:", length(vars_num)))
+                                "variables numericas. Actual:", length(vars_num)))
   }
   
   total_na <- sum(is.na(datos))
@@ -1012,19 +1011,19 @@ validar_datos <- function(datos, min_filas = 30, min_vars_num = 5) {
 }
 
 # ============================================================================
-# 13. analisis_sensibilidad — Análisis de sensibilidad de pesos
+# 13. analisis_sensibilidad — Analisis de sensibilidad de pesos
 # ============================================================================
 
-#' Análisis de sensibilidad del Índice MPCS
+#' Analisis de sensibilidad del Indice MPCS
 #'
-#' @param I_Grafo Índice del módulo de grafos (0-1)
-#' @param I_Markov Índice del módulo de Markov (0-1)
-#' @param I_Juegos Índice del módulo de juegos (0-1)
-#' @param n_sim Número de simulaciones (defecto: 10000)
+#' @param I_Grafo Indice del modulo de grafos (0-1)
+#' @param I_Markov Indice del modulo de Markov (0-1)
+#' @param I_Juegos Indice del modulo de juegos (0-1)
+#' @param n_sim Numero de simulaciones (defecto: 10000)
 #' @param R Factor de recursos (defecto: 0.65)
 #' @param escala Factor de escala (defecto: 1.5)
 #' @param seed Semilla para reproducibilidad (defecto: 123)
-#' @return Lista con resultados del análisis de sensibilidad
+#' @return Lista con resultados del analisis de sensibilidad
 #' @export
 analisis_sensibilidad <- function(I_Grafo, I_Markov, I_Juegos,
                                    n_sim = 10000, 
@@ -1114,10 +1113,10 @@ analisis_sensibilidad <- function(I_Grafo, I_Markov, I_Juegos,
 }
 
 # ============================================================================
-# 14. grafico_sensibilidad — Gráfico de sensibilidad
+# 14. grafico_sensibilidad — Grafico de sensibilidad
 # ============================================================================
 
-#' Gráfico de sensibilidad
+#' Grafico de sensibilidad
 #'
 #' @param resultado_sens Resultado de analisis_sensibilidad()
 #' @param idioma "es" o "en"
@@ -1135,9 +1134,9 @@ grafico_sensibilidad <- function(resultado_sens, idioma = "es") {
   )
   
   if (idioma == "es") {
-    titulo <- "Análisis de Sensibilidad del Índice MPCS"
+    titulo <- "Analisis de Sensibilidad del Indice MPCS"
     subtitulo <- paste("10,000 combinaciones aleatorias de pesos w1, w2, w3")
-    eje_x <- "Índice MPCS"
+    eje_x <- "Indice MPCS"
     eje_y <- "Frecuencia"
     leyenda <- "Tipo de nudge"
     default_label <- "Pesos por defecto"
@@ -1207,31 +1206,31 @@ grafico_sensibilidad <- function(resultado_sens, idioma = "es") {
 resumen_sensibilidad <- function(resultado_sens, idioma = "es") {
   
   if (idioma == "es") {
-    cat("=== RESULTADOS DEL ANÁLISIS DE SENSIBILIDAD ===\n\n")
-    cat(sprintf("Número de simulaciones: %d\n", resultado_sens$n_sim))
+    cat("=== RESULTADOS DEL ANALISIS DE SENSIBILIDAD ===\n\n")
+    cat(sprintf("Numero de simulaciones: %d\n", resultado_sens$n_sim))
     cat(sprintf("Media de I_MPCS: %.4f\n", resultado_sens$stats$media))
-    cat(sprintf("Desviación estándar: %.4f\n", resultado_sens$stats$sd))
-    cat(sprintf("Coeficiente de variación: %.1f%%\n", resultado_sens$stats$cv))
+    cat(sprintf("Desviacion estandar: %.4f\n", resultado_sens$stats$sd))
+    cat(sprintf("Coeficiente de variacion: %.1f%%\n", resultado_sens$stats$cv))
     cat(sprintf("Intervalo de confianza 95%%: [%.4f, %.4f]\n", 
                 resultado_sens$ic_inf, resultado_sens$ic_sup))
     cat(sprintf("\nI_MPCS con pesos por defecto (w1=0.35, w2=0.40, w3=0.25): %.4f\n", 
                 resultado_sens$I_MPCS_default))
     cat(sprintf("Tipo de nudge por defecto: %s\n", resultado_sens$tipo_default))
-    cat(sprintf("\nTipo de nudge más frecuente en simulaciones: %s (%.1f%%)\n",
+    cat(sprintf("\nTipo de nudge mas frecuente en simulaciones: %s (%.1f%%)\n",
                 resultado_sens$tipo_mas_frecuente, resultado_sens$pct_mas_frecuente))
     cat(sprintf("Coincidencia con tipo por defecto: %.1f%%\n", 
                 resultado_sens$pct_coincidencia))
     
-    cat("\n=== INTERPRETACIÓN ===\n")
+    cat("\n=== INTERPRETACION ===\n")
     if (resultado_sens$pct_coincidencia >= 70) {
-      cat("✅ La recomendación de nudge es ALTAMENTE ROBUSTA.\n")
-      cat("   El tipo de nudge se mantiene en más del 70% de las simulaciones.\n")
+      cat("La recomendacion de nudge es ALTAMENTE ROBUSTA.\n")
+      cat("  El tipo de nudge se mantiene en mas del 70% de las simulaciones.\n")
     } else if (resultado_sens$pct_coincidencia >= 50) {
-      cat("✅ La recomendación de nudge es ROBUSTA.\n")
-      cat("   El tipo de nudge se mantiene en más del 50% de las simulaciones.\n")
+      cat("La recomendacion de nudge es ROBUSTA.\n")
+      cat("  El tipo de nudge se mantiene en mas del 50% de las simulaciones.\n")
     } else {
-      cat("⚠️ La recomendación de nudge es SENSIBLE a los pesos.\n")
-      cat("   Se recomienda revisar la ponderación o realizar un análisis adicional.\n")
+      cat("La recomendacion de nudge es SENSIBLE a los pesos.\n")
+      cat("  Se recomienda revisar la ponderacion o realizar un analisis adicional.\n")
     }
     
   } else {
@@ -1252,14 +1251,14 @@ resumen_sensibilidad <- function(resultado_sens, idioma = "es") {
     
     cat("\n=== INTERPRETATION ===\n")
     if (resultado_sens$pct_coincidencia >= 70) {
-      cat("✅ The nudge recommendation is HIGHLY ROBUST.\n")
-      cat("   The nudge type remains in more than 70% of simulations.\n")
+      cat("The nudge recommendation is HIGHLY ROBUST.\n")
+      cat("  The nudge type remains in more than 70% of simulations.\n")
     } else if (resultado_sens$pct_coincidencia >= 50) {
-      cat("✅ The nudge recommendation is ROBUST.\n")
-      cat("   The nudge type remains in more than 50% of simulations.\n")
+      cat("The nudge recommendation is ROBUST.\n")
+      cat("  The nudge type remains in more than 50% of simulations.\n")
     } else {
-      cat("⚠️ The nudge recommendation is SENSITIVE to weights.\n")
-      cat("   Consider reviewing the weighting or conducting additional analysis.\n")
+      cat("The nudge recommendation is SENSITIVE to weights.\n")
+      cat("  Consider reviewing the weighting or conducting additional analysis.\n")
     }
   }
 }
