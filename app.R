@@ -639,26 +639,25 @@ server <- function(input, output, session) {
           R_factor = input$R_factor
         )
         
-results_list[[as.character(g)]] <- list(
-  grupo = g,
-  n = nrow(sub),
-  nodo_optimo = if (is.null(graph_res$optimal_node)) "Sin nodo" else graph_res$optimal_node,
-  I_grafo = graph_res$score,
-  I_markov = markov_res$score,
-  I_juegos = games_res$score,
-  alpha = alpha_grupo,
-  I_MPCS = index_res$I_MPCS,
-  k = index_res$k,
-  tipo = index_res$nudge_type,
-  graph = graph_res$graph,
-  graph_data = graph_data,
-  markov_mat = markov_res$mat,
-  sim_base = markov_res$sim_base,
-  dist_actual = markov_res$dist_actual,
-  T_base = markov_res$T_base,
-  # --- GUARDAR ESTADOS CORRECTAMENTE ---
-  estados = colnames(markov_res$mat)  # Esto debe tener los nombres correctos
-)
+        results_list[[as.character(g)]] <- list(
+          grupo = g,
+          n = nrow(sub),
+          nodo_optimo = if (is.null(graph_res$optimal_node)) "Sin nodo" else graph_res$optimal_node,
+          I_grafo = graph_res$score,
+          I_markov = markov_res$score,
+          I_juegos = games_res$score,
+          alpha = alpha_grupo,
+          I_MPCS = index_res$I_MPCS,
+          k = index_res$k,
+          tipo = index_res$nudge_type,
+          graph = graph_res$graph,
+          graph_data = graph_data,
+          markov_mat = markov_res$mat,
+          sim_base = markov_res$sim_base,
+          dist_actual = markov_res$dist_actual,
+          T_base = markov_res$T_base,
+          estados = colnames(markov_res$mat)  # Guardar nombres de estados
+        )
       }
       
       if (length(results_list) == 0) {
@@ -778,7 +777,7 @@ results_list[[as.character(g)]] <- list(
       }
     }
     
-    # --- Trayectorias de Markov (CORREGIDO) ---
+    # --- Trayectorias de Markov ---
     p_markov <- function() {
       if (!is.null(r$sim_base) && nrow(r$sim_base) > 0) {
         return(graficar_trayectorias_markov(
@@ -793,28 +792,28 @@ results_list[[as.character(g)]] <- list(
                annotate("text", x = 0.5, y = 0.5, label = "No hay datos para trayectorias"))
     }
     
- # --- Árbol de Markov (CORREGIDO) ---
-p_arbol <- function() {
-  if (!is.null(r$markov_mat)) {
-    # Obtener estados de la matriz o de r$estados
-    if (!is.null(r$estados) && length(r$estados) == ncol(r$markov_mat)) {
-      estados_arbol <- r$estados
-    } else if (!is.null(colnames(r$markov_mat))) {
-      estados_arbol <- colnames(r$markov_mat)
-    } else {
-      estados_arbol <- paste0("E", 1:ncol(r$markov_mat))
+    # --- Árbol de Markov (CORREGIDO) ---
+    p_arbol <- function() {
+      if (!is.null(r$markov_mat)) {
+        # Obtener estados correctamente
+        if (!is.null(r$estados) && length(r$estados) == ncol(r$markov_mat)) {
+          estados_arbol <- r$estados
+        } else if (!is.null(colnames(r$markov_mat))) {
+          estados_arbol <- colnames(r$markov_mat)
+        } else {
+          estados_arbol <- paste0("E", 1:ncol(r$markov_mat))
+        }
+        
+        return(graficar_arbol_markov(
+          P = r$markov_mat,
+          estados = estados_arbol,
+          umbral_prob = 0.05,
+          titulo = paste("Árbol de Transición —", first_group)
+        ))
+      }
+      return(ggplot() + theme_void() + 
+               annotate("text", x = 0.5, y = 0.5, label = "No hay datos para árbol de Markov"))
     }
-    
-    return(graficar_arbol_markov(
-      r$markov_mat, 
-      estados = estados_arbol,
-      umbral_prob = 0.05,
-      titulo = paste("Árbol de Transición —", first_group)
-    ))
-  }
-  return(ggplot() + theme_void() + 
-           annotate("text", x = 0.5, y = 0.5, label = "No hay datos para árbol de Markov"))
-}
     
     # --- Juego evolutivo ---
     p_juego <- function() {
