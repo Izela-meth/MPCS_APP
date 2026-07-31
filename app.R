@@ -792,28 +792,30 @@ server <- function(input, output, session) {
                annotate("text", x = 0.5, y = 0.5, label = "No hay datos para trayectorias"))
     }
     
-    # Arbol de Markov (CON NUEVA VERSION MEJORADA)
-    p_arbol <- function() {
-      if (!is.null(r$markov_mat)) {
-        # Obtener estados correctamente
-        if (!is.null(r$estados) && length(r$estados) == ncol(r$markov_mat)) {
-          estados_arbol <- r$estados
-        } else if (!is.null(colnames(r$markov_mat))) {
-          estados_arbol <- colnames(r$markov_mat)
-        } else {
-          estados_arbol <- paste0("E", 1:ncol(r$markov_mat))
-        }
-        
-        return(graficar_arbol_markov(
-          P = r$markov_mat,
-          estados = estados_arbol,
-          umbral_prob = 0.03,
-          titulo = paste("Arbol de Transicion -", first_group)
-        ))
-      }
-      return(ggplot() + theme_void() + 
-               annotate("text", x = 0.5, y = 0.5, label = "No hay datos para arbol de Markov"))
+# --- Arbol de Markov (CON NUEVA VERSION ULTRA CLARA) ---
+p_arbol <- function() {
+  if (!is.null(r$markov_mat)) {
+    # Obtener estados correctamente
+    if (!is.null(r$estados) && length(r$estados) == ncol(r$markov_mat)) {
+      estados_arbol <- r$estados
+    } else if (!is.null(colnames(r$markov_mat))) {
+      estados_arbol <- colnames(r$markov_mat)
+    } else {
+      estados_arbol <- paste0("Estado ", 1:ncol(r$markov_mat))
     }
+    
+    return(graficar_arbol_markov(
+      P = r$markov_mat,
+      estados = estados_arbol,
+      umbral_prob = 0.05,
+      titulo = paste("Arbol de Transicion -", first_group)
+    ))
+  }
+  return(ggplot() + theme_void() + 
+           annotate("text", x = 0.5, y = 0.5, 
+                    label = "No hay datos para arbol de Markov",
+                    size = 6, color = "#7F8C8D", fontface = "bold"))
+}
     
     p_juego <- function() {
       if (!is.null(r$alpha)) {
