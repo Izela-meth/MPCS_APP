@@ -412,8 +412,10 @@ server <- function(input, output, session) {
   })
   
   # ==========================================================================
-  # SALIDAS DE VISTA PREVIA
+  # SALIDAS DE VISTA PREVIA (ACTUALIZADAS CON reactive)
   # ==========================================================================
+  
+  # --- Vista previa de datos ---
   output$data_preview <- renderDT({
     req(rv$data)
     datatable(
@@ -431,6 +433,7 @@ server <- function(input, output, session) {
     )
   })
   
+  # --- Estadísticas básicas ---
   output$data_stats <- renderPrint({
     req(rv$data)
     cat("=== ESTADÍSTICAS DE LOS DATOS ===\n\n")
@@ -495,10 +498,10 @@ server <- function(input, output, session) {
   })
   
   # ==========================================================================
-  # FUNCIÓN PARA CALCULAR ALPHA
+  # FUNCIÓN PARA CALCULAR ALPHA (COMPLETAMENTE GENÉRICA)
   # ==========================================================================
   calcular_alpha <- function(sub) {
-    alpha <- 0.60
+    alpha <- 0.60  # valor por defecto
     
     if (input$alpha_mode == "manual") {
       alpha <- input$alpha_manual
@@ -529,6 +532,7 @@ server <- function(input, output, session) {
       }
       
     } else {
+      # Modo automático
       if ("Acceso_salud" %in% names(sub)) {
         alpha <- mean(sub$Acceso_salud, na.rm = TRUE)
       } else {
@@ -611,6 +615,7 @@ server <- function(input, output, session) {
           next
         }
         
+        # --- Grafo ---
         graph_data <- sub[, input$graph_vars, drop = FALSE]
         graph_res <- calcular_grafo(graph_data, input$graph_vars, input$threshold)
         
@@ -621,14 +626,18 @@ server <- function(input, output, session) {
           graph_res$graph <- NULL
         }
         
+        # --- Alpha (contexto) ---
         alpha_grupo <- calcular_alpha(sub)
         
+        # --- Markov ---
         markov_res <- calcular_markov(sub[[input$markov_var]], 
                                       umbral_objetivo = 0.50, 
                                       horizonte = 10)
         
+        # --- Juegos ---
         games_res <- calcular_juegos(markov_res$mat, input$R_factor, alpha = alpha_grupo)
         
+        # --- Índice integrado ---
         index_res <- calcular_indice(
           I_grafo = graph_res$score,
           I_markov = markov_res$score,
@@ -656,7 +665,7 @@ server <- function(input, output, session) {
           sim_base = markov_res$sim_base,
           dist_actual = markov_res$dist_actual,
           T_base = markov_res$T_base,
-          estados = colnames(markov_res$mat)  # Guardar nombres de estados
+          estados = colnames(markov_res$mat)
         )
       }
       
@@ -665,6 +674,7 @@ server <- function(input, output, session) {
         return()
       }
       
+      # Calcular sim_nudge para cada grupo
       for (g in names(results_list)) {
         r <- results_list[[g]]
         if (!is.null(r$markov_mat) && !is.null(r$sim_base)) {
@@ -735,6 +745,7 @@ server <- function(input, output, session) {
     first_group <- results$Grupo[1]
     r <- results_list[[as.character(first_group)]]
     
+    # --- Grafo ---
     if (!is.null(r$graph) && vcount(r$graph) > 0) {
       V(r$graph)$color <- ifelse(V(r$graph)$name == r$nodo_optimo, "#C0392B", "#F0DFC0")
       V(r$graph)$size <- ifelse(V(r$graph)$name == r$nodo_optimo, 25, 15)
@@ -747,6 +758,7 @@ server <- function(input, output, session) {
       }
     }
     
+    # --- Distribución de estados ---
     if (!is.null(markov_var) && markov_var %in% names(data)) {
       p_states <- function() {
         if (!"Group" %in% names(data)) data$Group <- "Global"
@@ -763,6 +775,7 @@ server <- function(input, output, session) {
       }
     }
     
+    # --- Ranking ---
     if (!is.null(results) && nrow(results) > 0) {
       p_rank <- function() {
         ggplot(results, aes(x = reorder(Grupo, I_MPCS), y = I_MPCS, fill = Tipo_Nudge)) +
@@ -777,7 +790,7 @@ server <- function(input, output, session) {
       }
     }
     
-    # --- Trayectorias de Markov ---
+    # --- Trayectorias de Markov (CORREGIDO: muestra todos los estados) ---
     p_markov <- function() {
       if (!is.null(r$sim_base) && nrow(r$sim_base) > 0) {
         return(graficar_trayectorias_markov(
@@ -785,28 +798,20 @@ server <- function(input, output, session) {
           r$sim_nudge, 
           estados = colnames(r$sim_base),
           titulo = paste("Trayectorias de Markov —", first_group),
-          y_label = "Probabilidad de ocupación (proporción de individuos)"
+          y_label = "Probabilidad"
         ))
       }
       return(ggplot() + theme_void() + 
                annotate("text", x = 0.5, y = 0.5, label = "No hay datos para trayectorias"))
     }
     
-    # --- Árbol de Markov (CORREGIDO) ---
+    # --- Árbol de Markov ---
     p_arbol <- function() {
       if (!is.null(r$markov_mat)) {
-        # Obtener estados correctamente
-        if (!is.null(r$estados) && length(r$estados) == ncol(r$markov_mat)) {
-          estados_arbol <- r$estados
-        } else if (!is.null(colnames(r$markov_mat))) {
-          estados_arbol <- colnames(r$markov_mat)
-        } else {
-          estados_arbol <- paste0("E", 1:ncol(r$markov_mat))
-        }
-        
+        estados <- if (!is.null(r$estados)) r$estados else colnames(r$markov_mat)
         return(graficar_arbol_markov(
-          P = r$markov_mat,
-          estados = estados_arbol,
+          r$markov_mat, 
+          estados,
           umbral_prob = 0.05,
           titulo = paste("Árbol de Transición —", first_group)
         ))
@@ -945,6 +950,7 @@ server <- function(input, output, session) {
     showNotification("✅ Análisis de sensibilidad completado.", type = "message")
   })
   
+  # Gráfico de sensibilidad
   output$sens_plot <- renderPlot({
     req(rv$sens_resultado)
     
@@ -993,6 +999,7 @@ server <- function(input, output, session) {
       )
   })
   
+  # Resumen textual de sensibilidad
   output$sens_summary <- renderPrint({
     req(rv$sens_resultado)
     
