@@ -108,26 +108,30 @@ ui <- page_navbar(
                       post = tags$span("  (|r| > value)")),
           
           # ============================================================
-          # [NUEVO] Campo para tasas de avance de Markov
+          # Campo para tasas de avance de Markov
           # ============================================================
           hr(),
           h4("Markov transition rates (optional)"),
           helpText("Enter the forward transition probabilities between consecutive states."),
-          helpText("Example for 5 states: 0.48, 0.89, 0.62 (diagnosis → purchase → correct intake → control)"),
+          helpText("Example for 5 states: 0.48, 0.89, 0.62"),
           textInput("tasas_avance_input", "Forward transition rates (comma separated):",
                     placeholder = "e.g., 0.48, 0.89, 0.62"),
           helpText("If left empty, the generic heuristic matrix will be used."),
           
           # ============================================================
-          # [NUEVO] Modulo de Bootstrap para selección de umbral
+          # Modulo de Bootstrap para selección de umbral (OPTIMIZADO)
           # ============================================================
           hr(),
-          h4("Bootstrap threshold selection"),
+          h4("Bootstrap threshold selection (optional)"),
           helpText("Evaluates the stability of the optimal node across different correlation thresholds."),
+          helpText("Note: 20 replicates take ~30-60 seconds on Render."),
           fluidRow(
             column(6,
               numericInput("boot_n_sim", "Number of bootstrap replicates:",
-                           value = 100, min = 50, max = 500, step = 10)
+                           value = 20,     # <-- DEFAULT 20
+                           min = 10,       # <-- MINIMO 10
+                           max = 50,       # <-- MAXIMO 50
+                           step = 5)
             ),
             column(6,
               actionButton("run_bootstrap", "Run Bootstrap",
@@ -139,8 +143,17 @@ ui <- page_navbar(
             condition = "input.run_bootstrap > 0",
             div(style = "padding: 10px; background-color: #f8f9fa; border-radius: 5px; margin-top: 10px;",
                 h5("Bootstrap Results"),
-                verbatimTextOutput("bootstrap_results"),
+                uiOutput("bootstrap_results_ui"),
                 plotOutput("bootstrap_plot", height = "200px")
+            )
+          ),
+          div(
+            class = "alert alert-info mt-2",
+            style = "font-size: 0.85em;",
+            icon("circle-info"),
+            HTML(
+              "<b>Tip:</b> Bootstrap is optional. If it takes too long, 
+              just use the default threshold of 0.10 (validated in the article)."
             )
           ),
           
@@ -625,56 +638,6 @@ server <- function(input, output, session) {
     return(max(0, min(1, alpha)))
   }
   
-# ==========================================================================
-# [CORREGIDO] ANALISIS DE BOOTSTRAP CON PROGRESO REAL
-# ==========================================================================
-observeEvent(input$run_bootstrap, {
-  req(rv$data)
-  
-  if (is.null(input$graph_vars) || length(input$graph_vars) < 5) {
-    showNotification("Select at least 5 variables for the graph.", type = "error")
-    return()
-  }
-  
-  withProgress(message = 'Running bootstrap...', value = 0, {
-    
-    datos <- rv$data
-    variables <- input$graph_vars
-    n_boot <- input$boot_n_sim
-    
-    # --- Función de progreso SIMPLIFICADA ---
-    progress_callback <- function(progress) {
-      # Usar incProgress con un valor absoluto
-      # El valor de progress viene entre 0 y 1
-      shiny::incProgress(
-        amount = progress - 0.05,  # Ajuste para empezar desde 0.05
-        detail = paste0(round(progress * 100, 0), "% completed")
-      )
-    }
-    
-    # Inicializar la barra
-    incProgress(0.05, detail = "Preparing data...")
-    
-    # --- Ejecutar bootstrap ---
-    resultado_boot <- seleccionar_umbral_bootstrap(
-      datos = datos,
-      variables = variables,
-      umbrales = seq(0.05, 0.20, 0.01),
-      n_boot = n_boot,
-      seed = 123,
-      criterio_jaccard = 0.70,
-      progress_callback = progress_callback
-    )
-    
-    incProgress(0.95, detail = "Generating results...")
-    
-    rv$bootstrap_resultado <- resultado_boot
-    
-    incProgress(1.0, detail = "Completed!")
-  })
-  
-  showNotification("Bootstrap completed successfully!", type = "message")
-})
   # ==========================================================================
   # FUNCION PARA PROCESAR TASAS DE AVANCE
   # ==========================================================================
@@ -698,6 +661,93 @@ observeEvent(input$run_bootstrap, {
     }
     return(tasas_avance)
   }
+  
+  # ==========================================================================
+  # [OPTIMIZADO] ANALISIS DE BOOTSTRAP PARA RENDER
+  # ==========================================================================
+  observeEvent(input$run_bootstrap, {
+    req(rv$data)
+    
+    if (is.null(input$graph_vars) || length(input$graph_vars) < 5) {
+      showNotification("Select at least 5 variables for the graph.", type = "error")
+      return()
+    }
+    
+    showNotification("Running bootstrap analysis. This may take 30-60 seconds...", 
+                     type = "message", duration = 5)
+    
+    withProgress(message = 'Running bootstrap...', value = 0.1, {
+      
+      datos <- rv$data
+      variables <- input$graph_vars
+      n_boot <- input$boot_n_sim
+      
+      # Usar umbrales reducidos para Render (6 valores en lugar de 16)
+      umbrales <- c(0.05, 0.07, 0.10, 0.12, 0.15, 0.20)
+      
+      incProgress(0.2, detail = "Processing thresholds...")
+      
+      # --- Ejecutar bootstrap ---
+      resultado_boot <- seleccionar_umbral_bootstrap(
+        datos = datos,
+        variables = variables,
+        umbrales = umbrales,
+        n_boot = n_boot,
+        seed = 123,
+        criterio_jaccard = 0.70
+      )
+      
+      incProgress(0.9, detail = "Generating results...")
+      
+      rv$bootstrap_resultado <- resultado_boot
+      
+      incProgress(1.0, detail = "Completed!")
+    })
+    
+    showNotification("Bootstrap completed successfully!", type = "message")
+  })
+  
+  # Salida de bootstrap en HTML
+  output$bootstrap_results_ui <- renderUI({
+    req(rv$bootstrap_resultado)
+    
+    res <- rv$bootstrap_resultado
+    
+    jaccard_optimo <- res$resultados$Jaccard_Promedio[which(res$resultados$Umbral == res$umbral_optimo)[1]]
+    if (length(jaccard_optimo) == 0) jaccard_optimo <- NA
+    
+    HTML(paste0(
+      "<div style='background-color: #f0f8ff; padding: 12px; border-radius: 5px; border-left: 4px solid #3498DB;'>",
+      "<b>Optimal threshold:</b> <span style='color:#C0392B;font-size:20px;font-weight:bold;'>", 
+      round(res$umbral_optimo, 2), "</span><br>",
+      "<b>Original node:</b> ", res$nodo_original, "<br>",
+      "<b>Most frequent node (bootstrap):</b> ", res$nodo_mas_frecuente, 
+      " (", round(res$pct_nodo_mas_frecuente, 1), "% stability)<br>",
+      if (!is.na(jaccard_optimo)) paste0("<b>Jaccard similarity:</b> ", round(jaccard_optimo, 3)) else "",
+      "</div>"
+    ))
+  })
+  
+  # Grafico de bootstrap
+  output$bootstrap_plot <- renderPlot({
+    req(rv$bootstrap_resultado)
+    
+    res <- rv$bootstrap_resultado
+    df <- res$resultados
+    
+    ggplot(df, aes(x = Umbral)) +
+      geom_line(aes(y = Jaccard_Promedio, color = "Jaccard"), linewidth = 1.2) +
+      geom_point(aes(y = Jaccard_Promedio, color = "Jaccard"), size = 2) +
+      geom_vline(xintercept = res$umbral_optimo, linetype = "dashed", color = "#C0392B", linewidth = 1) +
+      annotate("text", x = res$umbral_optimo + 0.008, y = max(df$Jaccard_Promedio) * 0.9,
+               label = paste0("Optimal = ", round(res$umbral_optimo, 2)),
+               color = "#C0392B", fontface = "bold", hjust = 0) +
+      scale_y_continuous(labels = scales::percent, limits = c(0, 1)) +
+      labs(title = "Graph stability by threshold (Jaccard)",
+           x = "Correlation threshold", y = "Jaccard similarity") +
+      theme_minimal(base_size = 11) +
+      theme(legend.position = "bottom")
+  })
   
   # ==========================================================================
   # EJECUTAR MPCS
@@ -784,7 +834,7 @@ observeEvent(input$run_bootstrap, {
         orden_estados <- detectar_orden_estados(estados_unicos)
         
         # ============================================================
-        # [NUEVO] PROCESAR TASAS DE AVANCE DESDE INPUT
+        # PROCESAR TASAS DE AVANCE DESDE INPUT
         # ============================================================
         tasas_avance <- procesar_tasas_avance(orden_estados)
         
