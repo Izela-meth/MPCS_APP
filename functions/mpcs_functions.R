@@ -1302,6 +1302,19 @@ resumen_sensibilidad <- function(resultado_sens, idioma = "es") {
 # 16. seleccionar_umbral_bootstrap — Selección de umbral por estabilidad
 # ============================================================================
 
+#' Seleccion de umbral por bootstrap
+#'
+#' Evalua la estabilidad del nodo optimo y de las aristas del grafo
+#' a traves de remuestreo bootstrap para diferentes umbrales de correlacion.
+#'
+#' @param datos data.frame con las variables del sistema
+#' @param variables vector con nombres de columnas a incluir en el grafo
+#' @param umbrales vector numerico con los umbrales a evaluar (defecto: c(0.05, 0.07, 0.10, 0.12, 0.15, 0.20))
+#' @param n_boot numero de replicas bootstrap (defecto: 20)
+#' @param seed semilla para reproducibilidad (defecto: 123)
+#' @param criterio_jaccard umbral minimo de similitud de Jaccard para considerar estabilidad (defecto: 0.70)
+#' @return lista con umbral_optimo, resultados detallados, criterio_jaccard, n_boot, nodo_original, nodo_mas_frecuente y pct_nodo_mas_frecuente
+#' @export
 seleccionar_umbral_bootstrap <- function(datos, variables, 
                                          umbrales = c(0.05, 0.07, 0.10, 0.12, 0.15, 0.20),
                                          n_boot = 20,
