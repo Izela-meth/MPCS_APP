@@ -423,6 +423,11 @@ calcular_indice <- function(I_grafo, I_markov, I_juegos,
                             w1 = 0.35, w2 = 0.40, w3 = 0.25,
                             R_factor = 0.65) {
   
+  # --- Manejar valores NA ---
+  if (is.na(I_grafo) || is.null(I_grafo)) I_grafo <- 0.5
+  if (is.na(I_markov) || is.null(I_markov)) I_markov <- 0.5
+  if (is.na(I_juegos) || is.null(I_juegos)) I_juegos <- 0.5
+  
   total <- w1 + w2 + w3
   if (abs(total - 1) > 0.01) {
     warning("Los ponderadores no suman 1. Se normalizaran.")
@@ -449,7 +454,6 @@ calcular_indice <- function(I_grafo, I_markov, I_juegos,
     nudge_type = tipo
   ))
 }
-
 # ============================================================================
 # 5. aplicar_nudge — Aplica nudge a la matriz de transicion
 # ============================================================================
