@@ -111,9 +111,9 @@ ui <- page_navbar(
           hr(),
           h4("Markov transition rates (optional)"),
           helpText("Enter the forward transition probabilities between consecutive states."),
-          helpText("Example for 5 states (4 transitions): 0.20, 0.48, 0.89, 0.62")
-textInput("tasas_avance_input", "Forward transition rates (comma separated):",
-          placeholder = "e.g., 0.20, 0.48, 0.89, 0.62")
+          helpText("Example for 5 states (4 transitions): 0.20, 0.48, 0.89, 0.62"),
+          textInput("tasas_avance_input", "Forward transition rates (comma separated):",
+                    placeholder = "e.g., 0.20, 0.48, 0.89, 0.62"),
           helpText("If left empty, the generic heuristic matrix will be used."),
           
           # Modulo de Bootstrap para selección de umbral
@@ -702,7 +702,7 @@ server <- function(input, output, session) {
   })
   
   # ==========================================================================
-  # SALIDA DE BOOTSTRAP - MANEJO DE ERRORES
+  # SALIDA DE BOOTSTRAP - MANEJO DE ERRORES (EN INGLES)
   # ==========================================================================
   output$bootstrap_results_ui <- renderUI({
     req(rv$bootstrap_resultado)
@@ -720,10 +720,10 @@ server <- function(input, output, session) {
     umbral_optimo <- round(res$umbral_optimo, 2)
     
     nodo_original <- res$nodo_original
-    if (is.null(nodo_original) || is.na(nodo_original)) nodo_original <- "No disponible"
+    if (is.null(nodo_original) || is.na(nodo_original)) nodo_original <- "Not available"
     
     nodo_mas_frecuente <- res$nodo_mas_frecuente
-    if (is.null(nodo_mas_frecuente) || is.na(nodo_mas_frecuente)) nodo_mas_frecuente <- "No disponible"
+    if (is.null(nodo_mas_frecuente) || is.na(nodo_mas_frecuente)) nodo_mas_frecuente <- "Not available"
     
     pct_estable <- res$pct_nodo_mas_frecuente
     if (is.null(pct_estable) || is.na(pct_estable) || !is.numeric(pct_estable)) {
@@ -760,7 +760,7 @@ server <- function(input, output, session) {
   })
   
   # ==========================================================================
-  # GRAFICO DE BOOTSTRAP
+  # GRAFICO DE BOOTSTRAP (EN INGLES)
   # ==========================================================================
   output$bootstrap_plot <- renderPlot({
     req(rv$bootstrap_resultado)
@@ -771,14 +771,14 @@ server <- function(input, output, session) {
     if (is.null(df) || nrow(df) == 0) {
       return(ggplot() + theme_void() + 
                annotate("text", x = 0.5, y = 0.5, 
-                        label = "No hay datos para el grafico",
+                        label = "No data for chart",
                         size = 5, color = "#7F8C8D"))
     }
     
     if (!"Jaccard_Promedio" %in% names(df)) {
       return(ggplot() + theme_void() + 
                annotate("text", x = 0.5, y = 0.5, 
-                        label = "Datos incompletos para el grafico",
+                        label = "Incomplete data for chart",
                         size = 5, color = "#7F8C8D"))
     }
     
