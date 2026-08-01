@@ -425,6 +425,53 @@ write.csv(tabla_comp, "MPCS_comparative_table_south_H10.csv", row.names = FALSE,
 cat("\n>> Table saved: MPCS_comparative_table_south_H10.csv\n")
 
 # =============================================================================
+# STEP 4: TRAJECTORIES PLOT (COMPARATIVE)
+# =============================================================================
+cat("\n=== GENERATING COMPARATIVE TRAJECTORIES ===\n")
+
+# --- Preparar datos de trayectorias ---
+tray_comp <- do.call(rbind, lapply(resultados, function(r) {
+  # Base (sin nudge)
+  df_base <- as.data.frame(r$sim_base)
+  df_base$Periodo <- 0:(nrow(df_base) - 1)
+  df_base$Region <- r$Region
+  df_base$Condicion <- "Without nudge"
+  df_base$Adherencia <- df_base$E4_Adherencia_plena + df_base$E5_Control
+  
+  # Nudge (con nudge)
+  df_nudge <- as.data.frame(r$sim_nudge)
+  df_nudge$Periodo <- 0:(nrow(df_nudge) - 1)
+  df_nudge$Region <- r$Region
+  df_nudge$Condicion <- "With nudge"
+  df_nudge$Adherencia <- df_nudge$E4_Adherencia_plena + df_nudge$E5_Control
+  
+  bind_rows(df_base, df_nudge)
+}))
+
+# --- Gráfico de trayectorias comparativas ---
+p_tray <- ggplot(tray_comp, aes(x = Periodo, y = Adherencia,
+                                color = Region, linetype = Condicion)) +
+  geom_line(linewidth = 1.1) +
+  geom_vline(xintercept = 10, linetype = "dashed", color = "gray50", alpha = 0.5) +
+  annotate("text", x = 10.5, y = 0.95, label = "H = 10", size = 3.5, color = "gray50") +
+  facet_wrap(~Condicion) +
+  scale_color_manual(values = c(
+    "#E74C3C", "#E67E22", "#2E86AB", "#1A8754", "#8E44AD", "#F39C12"
+  )) +
+  scale_y_continuous(labels = percent_format()) +
+  labs(title = "Adherence Trajectories — Southern Peru (H=10)",
+       subtitle = "Markov Chains MPCS · ENDES 2024",
+       x = "Period", y = "P(Full adherence + Control)",
+       color = "Region", linetype = "Condition") +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggsave("MPCS_trajectories_comparative_H10.png", p_tray,
+       width = 13, height = 7, dpi = 150)
+cat(">> Plot saved: MPCS_trajectories_comparative_H10.png\n")
+
+# =============================================================================
 # FINAL SUMMARY
 # =============================================================================
 cat("\n")
