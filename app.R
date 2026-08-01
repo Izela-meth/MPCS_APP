@@ -111,9 +111,9 @@ ui <- page_navbar(
           hr(),
           h4("Markov transition rates (optional)"),
           helpText("Enter the forward transition probabilities between consecutive states."),
-          helpText("Example for 5 states: 0.48, 0.89, 0.62"),
-          textInput("tasas_avance_input", "Forward transition rates (comma separated):",
-                    placeholder = "e.g., 0.48, 0.89, 0.62"),
+          helpText("Example for 5 states (4 transitions): 0.20, 0.48, 0.89, 0.62")
+textInput("tasas_avance_input", "Forward transition rates (comma separated):",
+          placeholder = "e.g., 0.20, 0.48, 0.89, 0.62")
           helpText("If left empty, the generic heuristic matrix will be used."),
           
           # Modulo de Bootstrap para selección de umbral
@@ -713,7 +713,7 @@ server <- function(input, output, session) {
       return(div(
         class = "alert alert-warning",
         icon("exclamation-triangle"),
-        " No se pudo determinar un umbral optimo. Intenta con mas replicas o un rango diferente."
+        " Could not determine an optimal threshold. Try with more replicates or a different range."
       ))
     }
     
@@ -751,7 +751,7 @@ server <- function(input, output, session) {
     if (!is.na(jaccard_optimo)) {
       html_parts <- c(html_parts, "<b>Jaccard similarity:</b> ", jaccard_optimo)
     } else {
-      html_parts <- c(html_parts, "<b>Jaccard similarity:</b> No disponible")
+      html_parts <- c(html_parts, "<b>Jaccard similarity:</b> Not available")
     }
     
     html_parts <- c(html_parts, "</div>")
