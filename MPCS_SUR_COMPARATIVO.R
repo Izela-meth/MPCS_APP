@@ -19,17 +19,18 @@ library(patchwork)
 # CONFIGURATION — CAMBIA LAS RUTAS AQUÍ
 # =============================================================================
 
-# --- Tus rutas reales ---
-ruta_csalud <- "C:/Users/Blue/Documents/Rstudio/CENDES/CSALUD01_2024.dta"
-ruta_rech0  <- "C:/Users/Blue/Documents/Rstudio/CENDES/RECH0_2024.dta"
+# --- CONFIGURATION: Set paths here ---
+# Option A: Relative paths (recommended for reproducibility)
+ruta_csalud <- "data/CSALUD01_2024.dta"
+ruta_rech0  <- "data/RECH0_2024.dta"
 
-# --- Verificar archivos ---
+# Option B: Manual selection if files are not in data/ folder
 if (!file.exists(ruta_csalud)) {
-  cat("ERROR: CSALUD01 no encontrado. Selecciona manualmente...\n")
+  cat("File not found. Please select CSALUD01_2024.dta manually...\n")
   ruta_csalud <- file.choose()
 }
 if (!file.exists(ruta_rech0)) {
-  cat("ERROR: RECH0 no encontrado. Selecciona manualmente...\n")
+  cat("File not found. Please select RECH0_2024.dta manually...\n")
   ruta_rech0 <- file.choose()
 }
 
