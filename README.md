@@ -19,15 +19,13 @@ The MPCS generates a weighted **MPCS Index** that translates into a recommended
 **nudge type and intensity** for behavioral interventions.
 
 ## Repository Structure
+
 MPCS/
 ├── MPCS_SUR_COMPARATIVO.R          # Main analysis script (ENDES 2024 data)
-├── MPCS_paper_figures.R            # Reproduces exact manuscript figures
+├── MPCS_SUR_COMPARATIVO_Hardcode.R # Reproduces exact manuscript figures/tables
 ├── functions/
 │   └── mpcs_functions.R            # Core functions (graph, Markov, games)
-├── app/
-│   ├── app.R                       # Shiny application source
-│   └── functions/
-│       └── mpcs_functions.R        # App-specific functions
+├── app.R                           # Shiny application source
 ├── data/
 │   ├── CSALUD01_2024.dta           # ENDES 2024 health module (user-provided)
 │   ├── RECH0_2024.dta              # ENDES 2024 household module (user-provided)
@@ -37,11 +35,12 @@ MPCS/
 └── LICENSE
 
 
+
 ## Interactive Web Application
 
 A live version of the MPCS calculator is deployed on **Render**:
 
-🔗 ** https://mpcs-calculator.onrender.com/ **
+🔗 **[https://mpcs-calculator.onrender.com/](https://mpcs-calculator.onrender.com/)**
 
 The Shiny app allows non-technical users to:
 - Upload custom datasets
@@ -74,21 +73,36 @@ MPCS_table8_weight_sensitivity.csv
 MPCS_table9_threshold_sensitivity.csv
 MPCS_table10_markov_sensitivity.csv
 
-2. Demo without ENDES data
-Use the synthetic demo_data.csv to test the workflow without licensed microdata: # Edit the path in MPCS_SUR_COMPARATIVO.R or use demo_data.csv
+2. Exact manuscript reproduction
+ source("MPCS_SUR_COMPARATIVO_Hardcode.R")
 
 3. Local Shiny app
+ shiny::runApp("app.R")
+
+4. Demo without ENDES data
+Use the synthetic demo_data.csv to test the workflow without licensed microdata
 
 Numerical Reproducibility Note
 
-The I_MPCS values reported in the manuscript (Table 6) were computed using the ENDES 2024 microdata release. The provided analysis script (MPCS_SUR_COMPARATIVO.R) reconstructs the full workflow from raw data and reproduces the same regional ranking and nudge classifications.
-Minor numerical differences (< 0.002 in I_MPCS, < 0.003 in I_Markov) may arise due to iterative refinements in outlier handling and state-definition logic during manuscript preparation. These differences do not affect the qualitative conclusions (regional ranking, optimal nudge node, or nudge type classification) and are consistent across all six regions.
+The I_MPCS values reported in the manuscript (Table 6) were computed using the
+ENDES 2024 microdata release. The provided analysis script (MPCS_SUR_COMPARATIVO.R)
+reconstructs the full workflow from raw data and reproduces the same regional
+ranking and nudge classifications.
+Minor numerical differences (< 0.002 in I_MPCS, < 0.003 in I_Markov) may arise
+due to iterative refinements in outlier handling and state-definition logic
+during manuscript preparation. These differences do not affect the qualitative
+conclusions (regional ranking, optimal nudge node, or nudge type classification)
+and are consistent across all six regions.
 
 License
 
 This project is licensed under the MIT License — see the LICENSE file.
+
+
 Citation
+
+
 If you use this code or the MPCS model, please cite:
-Zela, I. (2026). MPCS: A reproducible workflow integrating graph
+Zela Llanque, I. J. (2026). MPCS: A reproducible workflow integrating graph
 theory, Markov chains, and evolutionary game theory for behavioral nudge design.
-, [Vol], [Pages]. https://doi.org/10.xxxx/xxxxx
+MethodsX, [Vol], [Pages]. https://doi.org/10.xxxx/xxxxx
