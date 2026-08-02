@@ -17,11 +17,10 @@ library(haven); library(dplyr); library(tidyr)
 library(ggplot2); library(igraph); library(scales); library(gridExtra)
 library(patchwork)
 
-# =============================================================================
-# CONFIGURATION
-# =============================================================================
-path_csalud <- "C:/Users/Blue/Documents/Rstudio/CENDES/CSALUD01_2024.dta"
-path_rech0  <- "C:/Users/Blue/Documents/Rstudio/CENDES/RECH0_2024.dta"
+# --- CONFIGURATION: Set paths here ---
+# Option A: Relative paths (recommended for reproducibility)
+ruta_csalud <- "data/CSALUD01_2024.dta"
+ruta_rech0  <- "data/RECH0_2024.dta"
 
 if (!file.exists(path_csalud)) {
   cat("ERROR: CSALUD01 not found. Select manually...\n")
