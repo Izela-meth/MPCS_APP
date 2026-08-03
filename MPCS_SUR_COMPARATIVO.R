@@ -1,5 +1,5 @@
 # =============================================================================
-# MPCS — COMPARATIVE ANALYSIS SOUTHERN PERU 
+# MPCS — COMPARATIVE ANALYSIS SOUTHERN PERU (FINAL VERSION WITH OPTION B)
 # =============================================================================
 # Regions: Apurímac, Arequipa, Cusco, Moquegua, Puno, Tacna
 # Source: ENDES 2024 — INEI Peru
@@ -8,6 +8,7 @@
 # from each region's empirical dist(0) and the transition matrix P, and may
 # differ from the published values (Hardcode script) by ~0.001 due to this
 # recalculation rather than using fixed literature-derived figures.
+
 
 # --- PACKAGES ---
 paquetes <- c("haven", "dplyr", "tidyr", "ggplot2", "igraph",
@@ -25,8 +26,18 @@ library(patchwork)
 
 # --- CONFIGURATION: Set paths here ---
 # Option A: Relative paths (recommended for reproducibility)
-csv
+ruta_csalud <- "data/CSALUD01_2024.dta"
+ruta_rech0  <- "data/RECH0_2024.dta"
 
+# Option B: Manual selection if files are not in data/ folder
+if (!file.exists(ruta_csalud)) {
+  cat("File not found. Please select CSALUD01_2024.dta manually...\n")
+  ruta_csalud <- file.choose()
+}
+if (!file.exists(ruta_rech0)) {
+  cat("File not found. Please select RECH0_2024.dta manually...\n")
+  ruta_rech0 <- file.choose()
+}
 
 # --- Regiones ---
 regiones_sur <- list(
@@ -980,19 +991,19 @@ tabla10_gt <- data.frame(
 
 for (param_name in c("a_AA", "a_AR", "a_RA", "a_RR")) {
   for (v_pct in c(-0.20, 0.20)) {
-
+    
     I_MPCS_vals <- numeric(length(regiones_sur))
     for (i in seq_along(regiones_sur)) {
       r <- regiones_sur[[i]]
       res_base <- calcular_mpcs_numerico(df_raw, r$codigo, r$nombre, 
                                          horizonte = 10, umbral = 0.10)
       alpha_reg <- res_base$Alpha
-
+      
       # Calcular payoff baseline para esta región
       a_AR_base <- -(0.5 + 0.5 * (1 - alpha_reg))
       a_RA_base <- 0.5 + 0.5 * alpha_reg
       a_RR_base <- 0.5 + 0.5 * (1 - alpha_reg)
-
+      
       # Preparar argumentos para do.call
       args_list <- list(
         df_raw = df_raw,
@@ -1001,7 +1012,7 @@ for (param_name in c("a_AA", "a_AR", "a_RA", "a_RR")) {
         horizonte = 10,
         umbral = 0.10
       )
-
+      
       if (param_name == "a_AA") {
         args_list$a_AA <- 2.0 * (1 + v_pct)
       } else if (param_name == "a_AR") {
@@ -1011,23 +1022,23 @@ for (param_name in c("a_AA", "a_AR", "a_RA", "a_RR")) {
       } else if (param_name == "a_RR") {
         args_list$a_RR <- a_RR_base * (1 + v_pct)
       }
-
+      
       res <- do.call(calcular_mpcs_numerico, args_list)
       I_MPCS_vals[i] <- res$I_MPCS
     }
-
+    
     delta <- abs(I_MPCS_vals - tabla_comp$I_MPCS)
     mean_delta <- round(mean(delta), 3)
-
+    
     rank_base <- order(tabla_comp$I_MPCS, decreasing = TRUE)
     rank_new <- order(I_MPCS_vals, decreasing = TRUE)
     ranking_ok <- all(rank_base == rank_new)
-
+    
     k_vals <- pmin(1, I_MPCS_vals * 0.65 * 1.5)
     tipos <- case_when(k_vals < 0.25 ~ "Informational", k_vals < 0.50 ~ "Structural",
                        k_vals < 0.75 ~ "Normative", TRUE ~ "Systemic multi-nudge")
     nudge_ok <- all(tipos == "Normative")
-
+    
     tabla10_gt <- rbind(tabla10_gt, data.frame(
       Parameter = param_name,
       Variation = paste0(ifelse(v_pct > 0, "+", ""), v_pct * 100, "%"),
