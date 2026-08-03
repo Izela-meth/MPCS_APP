@@ -62,6 +62,20 @@ install.packages(c("haven", "dplyr", "tidyr", "ggplot2", "igraph",
 Usage
 1. Full analysis from ENDES microdata
 Place CSALUD01_2024.dta and RECH0_2024.dta in the data/ folder, then run: source("MPCS_SUR_COMPARATIVO.R")
+## Reproducing the validation study (ENDES 2024)
+
+The original ENDES 2024 microdata can be obtained from INEI:
+https://proyectos.inei.gob.pe/microdatos/
+
+Required modules:
+- CSALUD01 (Module 1640)
+- RECH0 (Module 1629)
+
+Step-by-step download:
+1. Select "Consultas por Encuestas".
+2. Choose "Encuesta Demográfica y de Salud Familiar – ENDES, Año: 2024".
+3. Download ZIP for modules 1640 and 1629.
+4. Set file paths in `MPCS_SUR_COMPARATIVO.R`.
 
 This generates:
 Figure1_MPCS_ranking_H10.png
