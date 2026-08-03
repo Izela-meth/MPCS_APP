@@ -7,6 +7,10 @@
 # FULLY CONSISTENT WITH THE ARTICLE - TABLES AND FIGURES MATCH EXACTLY
 # =============================================================================
 
+# NOTE: This script reproduces the EXACT values published in the article
+# (Tables 6-9). I_Markov is hardcoded per region from the original run
+# over licensed ENDES 2024 microdata, not recalculated here.
+
 # --- PACKAGES ----------------------------------------------------------------
 packages <- c("haven", "dplyr", "tidyr", "ggplot2", "igraph",
               "markovchain", "reshape2", "scales", "gridExtra", "patchwork")
@@ -17,10 +21,11 @@ library(haven); library(dplyr); library(tidyr)
 library(ggplot2); library(igraph); library(scales); library(gridExtra)
 library(patchwork)
 
-# --- CONFIGURATION: Set paths here ---
-# Option A: Relative paths (recommended for reproducibility)
-ruta_csalud <- "data/CSALUD01_2024.dta"
-ruta_rech0  <- "data/RECH0_2024.dta"
+# =============================================================================
+# CONFIGURATION
+# =============================================================================
+path_csalud <- "C:/Users/Blue/Documents/Rstudio/CENDES/CSALUD01_2024.dta"
+path_rech0  <- "C:/Users/Blue/Documents/Rstudio/CENDES/RECH0_2024.dta"
 
 if (!file.exists(path_csalud)) {
   cat("ERROR: CSALUD01 not found. Select manually...\n")
@@ -101,6 +106,10 @@ construir_matriz_markov_articulo <- function() {
   estados <- c("E1_Undiagnosed", "E2_Diagnosed_nonadherent", 
                "E3_Partial_adherence", "E4_Full_adherence", "E5_Metabolic_control")
   dimnames(P) <- list(estados, estados)
+  
+  # Normalizar filas para mantener matriz estocástica
+  P <- P / rowSums(P)
+  
   return(P)
 }
 
@@ -492,6 +501,61 @@ plot_evolutionary_game <- function(alpha, p_star, title = "Replicator Dynamics")
                                           plot.subtitle = element_text(size = 11, hjust = 0.5, color = "#7F8C8D")))
 }
 
+
+# =============================================================================
+# FUNCIÓN: Recalcular MPCS con parámetros variables (para sensibilidad)
+# =============================================================================
+recalcular_mpcs_fila <- function(fila, t1 = 0.48, t2 = 0.89, t3 = 0.62,
+                                  a_AA = 2.0, a_AR = NULL, a_RA = NULL, a_RR = NULL) {
+  alpha <- fila$Alpha
+  I_Grafo <- fila$I_Graph
+
+  # --- Recalcular I_Markov con nuevas tasas ---
+  estados <- c("E1_Undiagnosed", "E2_Diagnosed_nonadherent", 
+               "E3_Partial_adherence", "E4_Full_adherence", "E5_Metabolic_control")
+
+  P <- matrix(c(
+    0.750, 0.200, 0.040, 0.010, 0.000,
+    0.050, 0.450, t1,    0.020, 0.000,
+    0.010, 0.090, 0.005, t2,    0.005,
+    0.005, 0.010, 0.080, 0.285, t3,
+    0.000, 0.010, 0.020, 0.100, 0.870
+  ), nrow = 5, byrow = TRUE, dimnames = list(estados, estados))
+
+  # Normalizar filas para mantener matriz estocástica
+  P <- P / rowSums(P)
+  
+  # Distribuciones iniciales aproximadas (consistentes con Figura 3)
+  dist_inicial <- list(
+    Apurimac = c(0.91, 0.02, 0.03, 0.025, 0.015),
+    Arequipa = c(0.89, 0.03, 0.025, 0.03, 0.025),
+    Cusco    = c(0.90, 0.025, 0.025, 0.03, 0.02),
+    Moquegua = c(0.88, 0.035, 0.03, 0.035, 0.02),
+    Puno     = c(0.91, 0.025, 0.02, 0.025, 0.02),
+    Tacna    = c(0.889, 0.030, 0.022, 0.035, 0.024)
+  )
+
+  v0 <- dist_inicial[[fila$Region]]
+  sim <- simular_cadena_markov(P, v0, n_periodos = 30)
+  idx_h <- min(10 + 1, nrow(sim))
+  I_Markov <- sim[idx_h, "E4_Full_adherence"] + sim[idx_h, "E5_Metabolic_control"]
+  I_Markov <- max(0, min(1, I_Markov))
+
+  # --- Recalcular I_Games ---
+  if (is.null(a_AR)) a_AR <- -(0.5 + 0.5 * (1 - alpha))
+  if (is.null(a_RA)) a_RA <- 0.5 + 0.5 * alpha
+  if (is.null(a_RR)) a_RR <- 0.5 + 0.5 * (1 - alpha)
+
+  p_star <- max(0, min(1, (a_RR - a_AR) / (a_AA - a_AR - a_RA + a_RR)))
+  I_Games <- p_star
+
+  # --- Combinar ---
+  w <- c(0.35, 0.40, 0.25)
+  I_MPCS <- w[1]*I_Grafo + w[2]*I_Markov + w[3]*I_Games
+
+  list(I_MPCS = I_MPCS, I_Markov = I_Markov, I_Games = I_Games)
+}
+
 # =============================================================================
 # STEP 1: DATA LOADING
 # =============================================================================
@@ -856,6 +920,124 @@ write.csv(TABLE6_EXACT, "MPCS_table6_H10.csv", row.names = FALSE, fileEncoding =
 write.csv(TABLE7_EXACT, "MPCS_table7_horizon_sensitivity.csv", row.names = FALSE, fileEncoding = "UTF-8")
 write.csv(TABLE8_EXACT, "MPCS_table8_weight_sensitivity.csv", row.names = FALSE, fileEncoding = "UTF-8")
 write.csv(TABLE9_EXACT, "MPCS_table9_threshold_sensitivity.csv", row.names = FALSE, fileEncoding = "UTF-8")
+
+# =============================================================================
+# TABLE 10: Complete Sensitivity Analysis (Markov + Game Theory)
+# =============================================================================
+cat("
+=== GENERATING TABLE 10: Complete Sensitivity ===
+")
+
+TABLE10 <- data.frame(
+  Parameter = character(),
+  Variation = character(),
+  Mean_abs_delta = numeric(),
+  Ranking_preserved = character(),
+  Nudge_type_preserved = character(),
+  stringsAsFactors = FALSE
+)
+
+# --- Markov rates sensitivity ---
+tasas_base <- c(t1 = 0.48, t2 = 0.89, t3 = 0.62)
+variaciones <- c("minus20" = -0.20, "minus10" = -0.10, "plus10" = 0.10, "plus20" = 0.20)
+
+for (param_name in names(tasas_base)) {
+  for (v_name in names(variaciones)) {
+    v_pct <- variaciones[v_name]
+    t_nueva <- tasas_base[param_name] * (1 + v_pct)
+    t_nueva <- max(0, min(1, t_nueva))
+
+    I_MPCS_vals <- numeric(nrow(TABLE6_EXACT))
+    for (i in 1:nrow(TABLE6_EXACT)) {
+      t1_i <- ifelse(param_name == "t1", t_nueva, tasas_base["t1"])
+      t2_i <- ifelse(param_name == "t2", t_nueva, tasas_base["t2"])
+      t3_i <- ifelse(param_name == "t3", t_nueva, tasas_base["t3"])
+
+      res <- recalcular_mpcs_fila(TABLE6_EXACT[i, ], t1 = t1_i, t2 = t2_i, t3 = t3_i)
+      I_MPCS_vals[i] <- res$I_MPCS
+    }
+
+    delta <- abs(I_MPCS_vals - TABLE6_EXACT$I_MPCS)
+    mean_delta <- round(mean(delta), 3)
+
+    rank_base <- order(TABLE6_EXACT$I_MPCS, decreasing = TRUE)
+    rank_new <- order(I_MPCS_vals, decreasing = TRUE)
+    ranking_ok <- all(rank_base == rank_new)
+
+    k_vals <- pmin(1, I_MPCS_vals * 0.65 * 1.5)
+    tipos <- case_when(k_vals < 0.25 ~ "Informational", k_vals < 0.50 ~ "Structural",
+                       k_vals < 0.75 ~ "Normative", TRUE ~ "Systemic multi-nudge")
+    nudge_ok <- all(tipos == "Normative")
+
+    TABLE10 <- rbind(TABLE10, data.frame(
+      Parameter = param_name,
+      Variation = paste0(ifelse(v_pct > 0, "+", ""), v_pct * 100, "%"),
+      Mean_abs_delta = mean_delta,
+      Ranking_preserved = ifelse(ranking_ok, "Yes", "No"),
+      Nudge_type_preserved = ifelse(nudge_ok, "Yes (100%)", "No"),
+      stringsAsFactors = FALSE
+    ))
+  }
+}
+
+# --- Game theory payoffs sensitivity ---
+for (param_name in c("a_AA", "a_AR", "a_RA", "a_RR")) {
+  for (v_pct in c(-0.20, 0.20)) {
+
+    I_MPCS_vals <- numeric(nrow(TABLE6_EXACT))
+    for (i in 1:nrow(TABLE6_EXACT)) {
+      fila <- TABLE6_EXACT[i, ]
+      alpha_reg <- fila$Alpha
+
+      a_AR_base <- -(0.5 + 0.5 * (1 - alpha_reg))
+      a_RA_base <- 0.5 + 0.5 * alpha_reg
+      a_RR_base <- 0.5 + 0.5 * (1 - alpha_reg)
+
+      args <- list(fila = fila)
+      if (param_name == "a_AA") {
+        args$a_AA <- 2.0 * (1 + v_pct)
+      } else if (param_name == "a_AR") {
+        args$a_AR <- a_AR_base * (1 + v_pct)
+      } else if (param_name == "a_RA") {
+        args$a_RA <- a_RA_base * (1 + v_pct)
+      } else if (param_name == "a_RR") {
+        args$a_RR <- a_RR_base * (1 + v_pct)
+      }
+
+      res <- do.call(recalcular_mpcs_fila, args)
+      I_MPCS_vals[i] <- res$I_MPCS
+    }
+
+    delta <- abs(I_MPCS_vals - TABLE6_EXACT$I_MPCS)
+    mean_delta <- round(mean(delta), 3)
+
+    rank_base <- order(TABLE6_EXACT$I_MPCS, decreasing = TRUE)
+    rank_new <- order(I_MPCS_vals, decreasing = TRUE)
+    ranking_ok <- all(rank_base == rank_new)
+
+    k_vals <- pmin(1, I_MPCS_vals * 0.65 * 1.5)
+    tipos <- case_when(k_vals < 0.25 ~ "Informational", k_vals < 0.50 ~ "Structural",
+                       k_vals < 0.75 ~ "Normative", TRUE ~ "Systemic multi-nudge")
+    nudge_ok <- all(tipos == "Normative")
+
+    TABLE10 <- rbind(TABLE10, data.frame(
+      Parameter = param_name,
+      Variation = paste0(ifelse(v_pct > 0, "+", ""), v_pct * 100, "%"),
+      Mean_abs_delta = mean_delta,
+      Ranking_preserved = ifelse(ranking_ok, "Yes", "No"),
+      Nudge_type_preserved = ifelse(nudge_ok, "Yes (100%)", "No"),
+      stringsAsFactors = FALSE
+    ))
+  }
+}
+
+cat("
+--- TABLE 10: Complete Sensitivity ---
+")
+print(TABLE10)
+write.csv(TABLE10, "MPCS_table10_complete_sensitivity.csv", row.names = FALSE, fileEncoding = "UTF-8")
+cat(">> TABLE 10 saved: MPCS_table10_complete_sensitivity.csv
+")
 
 # =============================================================================
 # FINAL SUMMARY
