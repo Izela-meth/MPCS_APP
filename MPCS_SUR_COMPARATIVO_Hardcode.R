@@ -561,8 +561,8 @@ recalcular_mpcs_fila <- function(fila, t1 = 0.48, t2 = 0.89, t3 = 0.62,
 # STEP 1: DATA LOADING
 # =============================================================================
 cat("\n=== LOADING DATA ===\n")
-df_raw <- read_dta(path_csalud)
-df_hogar <- read_dta(path_rech0)
+df_raw <- read_dta(ruta_csalud)
+df_hogar <- read_dta(ruta_rech0)
 df_hogar_dep <- df_hogar %>% select(HHID, HV023)
 df_raw <- df_raw %>% left_join(df_hogar_dep, by = "HHID")
 cat(sprintf("National total: %d records\n\n", nrow(df_raw)))
