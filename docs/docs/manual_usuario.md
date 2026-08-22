@@ -43,7 +43,7 @@ El MPCS integra tres herramientas matemáticas:
 ## Instalación
 
 ### Opción A: Usar la versión en línea (recomendada)
-1. Ve a: https://huggingface.co/spaces/tu-usuario/mpcs-calculator
+1. Ve a: https://mpcs-calculator.onrender.com/
 2. La aplicación cargará automáticamente
 3. No necesitas instalar nada
 
