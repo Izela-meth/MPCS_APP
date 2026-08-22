@@ -117,6 +117,4 @@ Citation
 
 
 If you use this code or the MPCS model, please cite:
-Zela Llanque, I. J. (2026). MPCS: A reproducible workflow integrating graph
-theory, Markov chains, and evolutionary game theory for behavioral nudge design.
-MethodsX, [Vol], [Pages]. https://doi.org/10.xxxx/xxxxx
+
