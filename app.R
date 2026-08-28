@@ -439,7 +439,7 @@ server <- function(input, output, session) {
     
     if (file.exists("data/demo_data3.csv")) {
       tryCatch({
-        rv$data <- read.csv("data/demo_data.csv")
+        rv$data <- read.csv("data/demo_data3.csv")
         rv$dominio <- "salud"
         showNotification("Demo data loaded from file.", type = "message")
       }, error = function(e) {
