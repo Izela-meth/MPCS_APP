@@ -437,7 +437,7 @@ server <- function(input, output, session) {
       showNotification("Demo data generated successfully (n=1000).", type = "message")
     }
     
-    if (file.exists("data/demo_data.csv")) {
+    if (file.exists("data/demo_data3.csv")) {
       tryCatch({
         rv$data <- read.csv("data/demo_data.csv")
         rv$dominio <- "salud"
