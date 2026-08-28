@@ -26,7 +26,7 @@ source("functions/mpcs_functions.R", local = TRUE)
 if (!file.exists("data/demo_data3.csv")) {
   dir.create("data", showWarnings = FALSE)
   datos_demo <- generar_demo_data(n = 1000, seed = 123)
-  write.csv(datos_demo, "data/demo_data.csv", row.names = FALSE)
+  write.csv(datos_demo, "data/demo_data3.csv", row.names = FALSE)
 }
 
 # ==============================================================================
