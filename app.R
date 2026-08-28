@@ -23,7 +23,7 @@ source("functions/mpcs_functions.R", local = TRUE)
 # ==============================================================================
 # GENERAR DATOS DE DEMOSTRACION INICIALES (SOLO ENDES)
 # ==============================================================================
-if (!file.exists("data/demo_data.csv")) {
+if (!file.exists("data/demo_data3.csv")) {
   dir.create("data", showWarnings = FALSE)
   datos_demo <- generar_demo_data(n = 1000, seed = 123)
   write.csv(datos_demo, "data/demo_data.csv", row.names = FALSE)
