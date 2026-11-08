@@ -113,21 +113,22 @@ ui <- page_navbar(
           hr(),
           h4("Markov Transition Rates"),
           radioButtons("markov_rates_mode", "Method to define transition probabilities:",
-                       choices = c(
-                         "Estimate from data (Equation X)" = "estimate",
-                         "Use calibrated values (Manuscript)" = "calibrated",
-                         "Enter manually (4 rates)" = "manual"
-                       ),
-                       selected = "estimate"),
+             choices = c(
+               "Estimate from data (Conversion Ratio)" = "estimate",
+               "Use calibrated values (Manuscript)" = "calibrated",
+               "Enter manually (4 rates)" = "manual"
+             ),
+             selected = "calibrated"),
           
           conditionalPanel(
-            condition = "input.markov_rates_mode == 'estimate'",
-            div(class = "alert alert-info", style = "font-size: 0.85em;",
-                icon("info-circle"),
-                HTML("<b>Estimation mode:</b> t1 (E1→E2) is fixed at 0.20 (diagnostic event). 
-                     t2, t3, t4 are estimated from the observed state proportions using Eq. X.")
-            )
-          ),
+  condition = "input.markov_rates_mode == 'estimate'",
+  div(class = "alert alert-warning", style = "font-size: 0.85em;",
+      icon("exclamation-triangle"),
+      HTML("<b>Warning:</b> Monte Carlo simulations show that the conversion ratio rule 
+           introduces a massive error (approx. -0.22) in populations dominated by 
+           undiagnosed individuals (like ENDES 2024). Use calibrated mode for reliable results.")
+  )
+),
           
           conditionalPanel(
             condition = "input.markov_rates_mode == 'calibrated'",
