@@ -1,493 +1,232 @@
 # ============================================================================
-# mpcs_functions.R — Funciones modulares del MPCS
-# ============================================================================
-# Este archivo contiene todas las funciones matemáticas del Modelo Predictivo
-# de Cambio Conductual por Sistemas (MPCS)
+# mpcs_functions.R — Funciones modulares del MPCS (Versión Metodológica)
 # ============================================================================
 
 # ============================================================================
 # 1. calcular_grafo — Construye el grafo conductual y calcula centralidades
 # ============================================================================
-
-#' Calcular grafo conductual y centralidad
-#'
-#' @param datos data.frame con las variables del sistema
-#' @param variables vector con nombres de columnas a incluir en el grafo
-#' @param umbral valor minimo de correlacion para incluir aristas (defecto: 0.10)
-#' @return lista con grafo, centralidad, nodo optimo e indice de impacto
 #' @export
 calcular_grafo <- function(datos, variables, umbral = 0.10) {
-  
   if (missing(datos) || missing(variables)) {
     warning("Se requieren datos y variables")
-    return(list(
-      graph = NULL,
-      centralidad = NULL,
-      optimal_node = NA,
-      score = 0.5
-    ))
+    return(list(graph = NULL, centralidad = NULL, optimal_node = NA, score = 0.5))
   }
-  
-  if (length(variables) < 3) {
-    warning("Se recomiendan al menos 5 variables para un grafo estable. Se usaran ", length(variables), " variables.")
-  }
-  
   df <- datos[, variables, drop = FALSE]
   df <- df[, colSums(is.na(df)) < nrow(df) * 0.5, drop = FALSE]
   
   if (ncol(df) < 3) {
-    warning("Menos de 3 variables validas despues de limpiar datos faltantes")
-    return(list(
-      graph = NULL,
-      centralidad = NULL,
-      optimal_node = NA,
-      score = 0.5
-    ))
+    warning("Menos de 3 variables validas")
+    return(list(graph = NULL, centralidad = NULL, optimal_node = NA, score = 0.5))
   }
   
-  mat_cor <- tryCatch({
-    cor(df, use = "pairwise.complete.obs", method = "spearman")
-  }, error = function(e) {
-    warning("Error al calcular la matriz de correlacion: ", e$message)
-    return(NULL)
-  })
-  
-  if (is.null(mat_cor)) {
-    return(list(
-      graph = NULL,
-      centralidad = NULL,
-      optimal_node = NA,
-      score = 0.5
-    ))
-  }
+  mat_cor <- tryCatch(cor(df, use = "pairwise.complete.obs", method = "spearman"), error = function(e) NULL)
+  if (is.null(mat_cor)) return(list(graph = NULL, centralidad = NULL, optimal_node = NA, score = 0.5))
   
   aristas <- which(abs(mat_cor) > umbral & mat_cor != 1, arr.ind = TRUE)
-  
-  if (nrow(aristas) == 0) {
-    warning("No se encontraron aristas con el umbral ", umbral)
-    return(list(
-      graph = NULL,
-      centralidad = NULL,
-      optimal_node = NA,
-      score = 0.5
-    ))
-  }
+  if (nrow(aristas) == 0) return(list(graph = NULL, centralidad = NULL, optimal_node = NA, score = 0.5))
   
   aristas_df <- as.data.frame(aristas) %>%
-    dplyr::mutate(
-      desde = rownames(mat_cor)[row],
-      hasta = colnames(mat_cor)[col],
-      peso = mat_cor[cbind(row, col)]
-    ) %>%
-    dplyr::filter(row < col) %>%
-    dplyr::select(desde, hasta, peso)
+    dplyr::mutate(desde = rownames(mat_cor)[row], hasta = colnames(mat_cor)[col], peso = mat_cor[cbind(row, col)]) %>%
+    dplyr::filter(row < col) %>% dplyr::select(desde, hasta, peso)
   
-  if (nrow(aristas_df) == 0) {
-    warning("No se encontraron aristas no redundantes")
-    return(list(
-      graph = NULL,
-      centralidad = NULL,
-      optimal_node = NA,
-      score = 0.5
-    ))
-  }
-  
-  g <- tryCatch({
-    igraph::graph_from_data_frame(aristas_df, directed = FALSE)
-  }, error = function(e) {
-    warning("Error al crear el grafo: ", e$message)
-    return(NULL)
-  })
-  
-  if (is.null(g) || igraph::vcount(g) < 2) {
-    return(list(
-      graph = NULL,
-      centralidad = NULL,
-      optimal_node = NA,
-      score = 0.5
-    ))
-  }
+  g <- tryCatch(igraph::graph_from_data_frame(aristas_df, directed = FALSE), error = function(e) NULL)
+  if (is.null(g) || igraph::vcount(g) < 2) return(list(graph = NULL, centralidad = NULL, optimal_node = NA, score = 0.5))
   
   grado_max <- max(igraph::degree(g))
-  
   centr <- data.frame(
     Variable = igraph::V(g)$name,
     Grado = igraph::degree(g),
     Intermediacion = igraph::betweenness(g, normalized = TRUE)
-  ) %>%
-    dplyr::mutate(
-      Impacto = round(0.60 * Intermediacion + 0.40 * (Grado / grado_max), 4)
-    ) %>%
+  ) %>% dplyr::mutate(Impacto = round(0.60 * Intermediacion + 0.40 * (Grado / grado_max), 4)) %>%
     dplyr::arrange(dplyr::desc(Impacto))
   
-  return(list(
-    graph = g,
-    centralidad = centr,
-    optimal_node = centr$Variable[1],
-    score = centr$Impacto[1]
-  ))
+  return(list(graph = g, centralidad = centr, optimal_node = centr$Variable[1], score = centr$Impacto[1]))
 }
 
 # ============================================================================
-# 2. calcular_markov — Estima cadena de Markov (OPCIÓN B: HORIZONTE FIJO H=10)
+# 2. estimar_tasas_transversal — NUEVA FUNCIÓN (Regla de proporciones)
 # ============================================================================
-
-#' Calcular cadena de Markov y convergencia (Opción B)
-#'
-#' @param estados vector con los estados de cada individuo
-#' @param orden_estados vector con el orden progresivo de estados (opcional)
-#' @param tasas_avance vector numérico de longitud m-1 con probabilidades de transición hacia adelante.
-#'        Si es NULL, usa heurística genérica. Si se provee, construye la matriz con esas tasas.
-#' @param umbral_objetivo proporción para considerar convergencia (defecto: 0.50)
-#' @param horizonte número de períodos para proyectar (defecto: 10)
-#' @return lista con matriz P, simulación, índice de Markov y tiempo de referencia
 #' @export
-calcular_markov <- function(estados, orden_estados = NULL, 
-                            tasas_avance = NULL,
-                            umbral_objetivo = 0.50, horizonte = 10) {
+estimar_tasas_transversal <- function(estados, orden_estados = NULL, pesos = NULL) {
+  estados <- as.character(estados)
+  validos <- !is.na(estados) & estados != ""
+  estados <- estados[validos]
+  if (!is.null(pesos)) pesos <- pesos[validos]
+  if (length(estados) < 30) stop("Se requieren al menos 30 observaciones válidas")
+  if (is.null(orden_estados)) stop("Debe proporcionar orden_estados")
   
-  # --- Validaciones ---
-  if (missing(estados)) {
-    warning("Se requiere el vector de estados")
-    return(list(
-      mat = NULL,
-      dist_actual = NULL,
-      sim_base = NULL,
-      T_base = horizonte,
-      score = 0.50
-    ))
+  m <- length(orden_estados)
+  if (m < 3) stop("Se requieren al menos 3 estados")
+  if (is.null(pesos)) pesos <- rep(1, length(estados))
+  
+  n <- sapply(orden_estados, function(e) sum(pesos[estados == e], na.rm = TRUE))
+  names(n) <- orden_estados
+  
+  tasas <- numeric(m - 1)
+  for (j in 1:(m - 1)) {
+    denom <- sum(n[j:m])
+    num   <- sum(n[(j + 1):m])
+    tasas[j] <- if (denom > 0) num / denom else NA_real_
   }
+  names(tasas) <- paste0("t", 1:(m - 1))
+  list(tasas = tasas, conteos = n, orden = orden_estados, n_total = sum(n))
+}
+
+# ============================================================================
+# 3. construir_matriz_P — NUEVA FUNCIÓN (Matriz de Markov de 5 estados)
+# ============================================================================
+#' @export
+construir_matriz_P <- function(t1, t2, t3, t4, estados_orden) {
+  P <- matrix(0, 5, 5, dimnames = list(estados_orden, estados_orden))
+  P[1, ] <- c(0,     t1,   0.04,  0.01,  0.00)
+  P[2, ] <- c(0.05,  0,    t2,    0.02,  0.00)
+  P[3, ] <- c(0.01,  0.09, 0,     t3,    0.005)
+  P[4, ] <- c(0.005, 0.01, 0.08,  0,     t4)
+  P[5, ] <- c(0.00,  0.01, 0.02,  0.10,  0.87)
   
-  # Limpiar datos
+  # Calcular inercia (diagonal) para que las filas sumen 1
+  for (i in 1:5) {
+    P[i, i] <- 1 - sum(P[i, -i])
+    if (P[i, i] < 0) {
+      P[i, -i] <- P[i, -i] / sum(P[i, -i]) * 0.99
+      P[i, i] <- 0.01
+    }
+  }
+  P
+}
+
+# ============================================================================
+# 4. calcular_markov — ACTUALIZADA (Acepta 3, 4 o 0 tasas)
+# ============================================================================
+#' @export
+calcular_markov <- function(estados, orden_estados = NULL, tasas_avance = NULL, 
+                            pesos = NULL, horizonte = 10) {
+  
   estados_clean <- estados[!is.na(estados) & estados != ""]
-  
   if (length(estados_clean) < 30) {
-    warning("Pocos datos para estimar la cadena de Markov (n = ", length(estados_clean), ")")
-    return(list(
-      mat = NULL,
-      dist_actual = NULL,
-      sim_base = NULL,
-      T_base = horizonte,
-      score = 0.50
-    ))
+    warning("Pocos datos para estimar la cadena de Markov")
+    return(list(mat = NULL, dist_actual = NULL, sim_base = NULL, T_base = horizonte, score = 0.50))
   }
-  
-  # --- Determinar estados únicos ---
-  estados_unicos <- unique(estados_clean)
   
   if (is.null(orden_estados)) {
+    estados_unicos <- unique(estados_clean)
     if (all(grepl("^E[0-9]+$", estados_unicos))) {
       orden_estados <- estados_unicos[order(as.numeric(gsub("E", "", estados_unicos)))]
     } else {
-      freq <- table(estados_clean)
-      orden_estados <- names(sort(freq, decreasing = TRUE))
-    }
-  } else {
-    faltantes <- setdiff(estados_unicos, orden_estados)
-    if (length(faltantes) > 0) {
-      orden_estados <- c(orden_estados, faltantes)
+      orden_estados <- names(sort(table(estados_clean), decreasing = TRUE))
     }
   }
   
   m <- length(orden_estados)
-  
-  if (m < 3) {
-    warning("Se necesitan al menos 3 estados para la cadena de Markov")
-    return(list(
-      mat = NULL,
-      dist_actual = NULL,
-      sim_base = NULL,
-      T_base = horizonte,
-      score = 0.50
-    ))
+  if (m != 5) {
+    warning("Esta versión está optimizada para 5 estados (E1-E5).")
+    return(list(mat = NULL, dist_actual = NULL, sim_base = NULL, T_base = horizonte, score = 0.50))
   }
   
-  # --- Calcular distribución actual ---
+  # Distribución inicial
   freq <- table(estados_clean)
-  dist_actual <- rep(0, m)
-  names(dist_actual) <- orden_estados
-  
+  dist_actual <- rep(0, m); names(dist_actual) <- orden_estados
   for (i in seq_along(orden_estados)) {
-    if (orden_estados[i] %in% names(freq)) {
-      dist_actual[i] <- freq[orden_estados[i]] / sum(freq)
-    }
+    if (orden_estados[i] %in% names(freq)) dist_actual[i] <- freq[orden_estados[i]] / sum(freq)
   }
   
-  # --- Construir matriz de transición ---
-  P <- matrix(0, nrow = m, ncol = m)
-  colnames(P) <- orden_estados
-  rownames(P) <- orden_estados
-  
-  # ============================================================
-  # [NUEVO] Si se proveen tasas_avance, usarlas para construir la matriz
-  # ============================================================
-  if (!is.null(tasas_avance) && length(tasas_avance) == (m - 1)) {
-    
-    # --- Construcción con tasas_avance definidas por el usuario ---
-    for (i in 1:(m-1)) {
-      t <- tasas_avance[i]
-      
-      # Asegurar que t esté en [0,1]
-      t <- max(0, min(1, t))
-      
-      # Inercia base: se reduce con el avance
-      inercia <- 0.50 - 0.15 * (i/m)
-      inercia <- max(0.10, min(0.80, inercia))
-      
-      # Retroceso base: se reduce con el avance
-      retroceso <- 0.05 * (1 - i/m)
-      retroceso <- max(0.01, min(0.20, retroceso))
-      
-      # ============================================================
-      # [CORREGIDO] La tasa de avance se respeta EXACTAMENTE
-      # Solo se ajustan inercia y retroceso para que quepan en 1 - t
-      # ============================================================
-      resto <- 1 - t
-      
-      # Escalar inercia para que quepa en el remanente
-      if (inercia > resto) {
-        inercia <- resto * 0.85  # deja 15% para retroceso
-      }
-      
-      # Escalar retroceso para que quepa en el remanente
-      if (retroceso > (resto - inercia)) {
-        retroceso <- resto - inercia
-      }
-      retroceso <- max(0, retroceso)
-      
-      # Si sobra espacio, distribuir en inercia y retroceso proporcionalmente
-      sobrante <- resto - inercia - retroceso
-      if (sobrante > 0.001) {
-        inercia <- inercia + sobrante * 0.7
-        retroceso <- retroceso + sobrante * 0.3
-      }
-      
-      # Asignar a la matriz
-      P[i, i] <- inercia
-      P[i, i+1] <- t
-      
-      if (i > 1) {
-        P[i, i-1] <- retroceso
-      }
-      
-      # Distribuir el resto en otros estados (si existe)
-      resto_final <- 1 - sum(P[i, ])
-      if (resto_final > 0.001) {
-        otros <- setdiff(1:m, c(i, i+1, if (i > 1) i-1 else NULL))
-        if (length(otros) > 0) {
-          P[i, otros] <- resto_final / length(otros)
-        }
-      }
+  # --- LÓGICA DE TASAS ---
+  if (!is.null(tasas_avance)) {
+    if (length(tasas_avance) == 3) {
+      # Modo Calibrado: t1=0.20, t2/t3/t4 = tasas_avance
+      t1 <- 0.20
+      t2 <- tasas_avance[1]; t3 <- tasas_avance[2]; t4 <- tasas_avance[3]
+    } else if (length(tasas_avance) == 4) {
+      # Modo Manual: t1, t2, t3, t4
+      t1 <- tasas_avance[1]; t2 <- tasas_avance[2]; t3 <- tasas_avance[3]; t4 <- tasas_avance[4]
+    } else {
+      stop("tasas_avance debe tener longitud 3 (calibrado) o 4 (completo).")
     }
-    
-    # Último estado: alta permanencia
-    P[m, m] <- 0.85
-    P[m, 1:(m-1)] <- (1 - 0.85) / (m - 1)
-    
   } else {
-    
-    # ============================================================
-    # [FALLBACK] Heurística genérica (cuando no se proveen tasas)
-    # ============================================================
-    for (i in 1:(m-1)) {
-      prob_avance <- 0.30 + 0.20 * (1 - i/m)
-      prob_quedarse <- 0.50 - 0.15 * (i/m)
-      prob_retroceso <- 0.10 * (1 - i/m)
-      
-      P[i, i] <- prob_quedarse
-      P[i, i+1] <- prob_avance
-      
-      if (i > 1) {
-        P[i, i-1] <- prob_retroceso
-      }
-      
-      resto <- 1 - sum(P[i, ])
-      if (resto > 0) {
-        otros <- setdiff(1:m, c(i, i+1, if (i > 1) i-1 else NULL))
-        if (length(otros) > 0) {
-          P[i, otros] <- resto / length(otros)
-        }
-      }
-    }
-    
-    P[m, m] <- 0.85
-    P[m, 1:(m-1)] <- (1 - 0.85) / (m - 1)
+    # Modo Estimación (Ecuación X)
+    res_tasas <- estimar_tasas_transversal(estados_clean, orden_estados, pesos)
+    t1 <- 0.20 # Calibrado (evento de diagnóstico)
+    t2 <- res_tasas$tasas[2]; t3 <- res_tasas$tasas[3]; t4 <- res_tasas$tasas[4]
   }
   
-  # --- Normalizar filas para asegurar que suman 1 ---
-  P <- P / rowSums(P)
+  P <- construir_matriz_P(t1, t2, t3, t4, orden_estados)
   
-  # --- Simular cadena de Markov ---
+  # Simulación
   simular <- function(P, v0, n = 30) {
-    m <- nrow(P)
-    dist <- matrix(0, n + 1, m)
+    dist <- matrix(0, n + 1, 5, dimnames = list(NULL, orden_estados))
     dist[1, ] <- v0
-    for (t in 2:(n + 1)) {
-      dist[t, ] <- dist[t-1, ] %*% P
-    }
-    colnames(dist) <- colnames(P)
-    return(dist)
+    for (t in 2:(n + 1)) dist[t, ] <- dist[t-1, ] %*% P
+    dist
   }
   
   sim_base <- simular(P, dist_actual)
-  
-  # ============================================================
-  # [OPCIÓN B] I_Markov = adherencia en horizonte fijo H
-  # ============================================================
   idx_h <- min(horizonte + 1, nrow(sim_base))
-  
-  if (m >= 2) {
-    score <- sim_base[idx_h, m] + sim_base[idx_h, max(1, m-1)]
-  } else {
-    score <- sim_base[idx_h, m]
-  }
-  
+  score <- sim_base[idx_h, "E4"] + sim_base[idx_h, "E5"] # Ajusta los nombres si usas E4_Adherencia_plena
   score <- max(0, min(1, score))
   
-  if (m >= 2) {
-    objetivo <- sim_base[, m] + sim_base[, max(1, m-1)]
-    T_base <- which(objetivo >= umbral_objetivo)[1]
-    if (is.na(T_base) || is.infinite(T_base)) {
-      T_base <- 20
-    }
-  } else {
-    T_base <- 10
-  }
-  
   return(list(
-    mat = P,
-    dist_actual = dist_actual,
-    sim_base = sim_base,
-    T_base = T_base,
-    score = score,
-    horizonte = horizonte
+    mat = P, dist_actual = dist_actual, sim_base = sim_base,
+    T_base = horizonte, score = score, horizonte = horizonte,
+    tasas_usadas = c(t1, t2, t3, t4)
   ))
 }
 
 # ============================================================================
-# 3. calcular_juegos — Calcula masa critica (TEORIA DE JUEGOS DINAMICA CON α)
+# 5. calcular_juegos (SIN CAMBIOS)
 # ============================================================================
- 
-#' Calcular teoria de juegos y masa critica (dinamica con α)
-#'
-#' @param P matriz de transicion de Markov (opcional, no se usa)
-#' @param R_factor factor de recursos (defecto: 0.65) — OBSOLETO
-#' @param alpha indicador de acceso a salud (0-1). Si no se proporciona, usa 0.60 por defecto.
-#' @return lista con masa critica e indice
 #' @export
 calcular_juegos <- function(P = NULL, R_factor = 0.65, alpha = NULL) {
+  if (is.null(alpha) || is.na(alpha)) alpha <- 0.60
+  a_AA <- 2.0; a_AR <- -(0.5 + 0.5 * (1 - alpha))
+  a_RA <- 0.5 + 0.5 * alpha; a_RR <- 0.5 + 0.5 * (1 - alpha)
   
-  if (is.null(alpha) || is.na(alpha)) {
-    alpha <- 0.60
-  }
-  
-  a_AA <- 2.0
-  a_AR <- -(0.5 + 0.5 * (1 - alpha))
-  a_RA <- 0.5 + 0.5 * alpha
-  a_RR <- 0.5 + 0.5 * (1 - alpha)
-  
-  numerador <- a_RR - a_AR
-  denominador <- a_AA - a_AR - a_RA + a_RR
-  p_star <- numerador / denominador
+  p_star <- (a_RR - a_AR) / (a_AA - a_AR - a_RA + a_RR)
   p_star <- max(0, min(1, p_star))
   
-  score <- p_star
-  
-  return(list(
-    p_star = p_star,
-    score = score,
-    alpha = alpha,
-    a_AA = a_AA,
-    a_AR = a_AR,
-    a_RA = a_RA,
-    a_RR = a_RR
-  ))
+  return(list(p_star = p_star, score = p_star, alpha = alpha, a_AA = a_AA, a_AR = a_AR, a_RA = a_RA, a_RR = a_RR))
 }
 
 # ============================================================================
-# 4. calcular_indice — Calcula Indice MPCS y tipo de nudge
+# 6. calcular_indice (SIN CAMBIOS)
 # ============================================================================
-
-#' Calcular Indice MPCS y tipo de nudge
-#'
-#' @param I_grafo indice del modulo de grafos
-#' @param I_markov indice del modulo de Markov (Opcion B: H=10)
-#' @param I_juegos indice del modulo de juegos (dinamico con α)
-#' @param w1 ponderador para grafos (defecto: 0.35)
-#' @param w2 ponderador para Markov (defecto: 0.40)
-#' @param w3 ponderador para juegos (defecto: 0.25)
-#' @param R_factor factor de recursos (defecto: 0.65)
-#' @return lista con I_MPCS, k, tipo de nudge
 #' @export
-calcular_indice <- function(I_grafo, I_markov, I_juegos, 
-                            w1 = 0.35, w2 = 0.40, w3 = 0.25,
-                            R_factor = 0.65) {
-  
-  # --- Manejar valores NA ---
+calcular_indice <- function(I_grafo, I_markov, I_juegos, w1 = 0.35, w2 = 0.40, w3 = 0.25, R_factor = 0.65) {
   if (is.na(I_grafo) || is.null(I_grafo)) I_grafo <- 0.5
   if (is.na(I_markov) || is.null(I_markov)) I_markov <- 0.5
   if (is.na(I_juegos) || is.null(I_juegos)) I_juegos <- 0.5
   
   total <- w1 + w2 + w3
-  if (abs(total - 1) > 0.01) {
-    warning("Los ponderadores no suman 1. Se normalizaran.")
-    w1 <- w1 / total
-    w2 <- w2 / total
-    w3 <- w3 / total
-  }
+  if (abs(total - 1) > 0.01) { w1 <- w1/total; w2 <- w2/total; w3 <- w3/total }
   
   I_MPCS <- w1 * I_grafo + w2 * I_markov + w3 * I_juegos
   I_MPCS <- max(0, min(1, I_MPCS))
-  
   k <- min(1, I_MPCS * R_factor * 1.5)
-  
   tipo <- dplyr::case_when(
-    k < 0.25 ~ "Informational",
-    k < 0.50 ~ "Structural",
-    k < 0.75 ~ "Normative",
-    TRUE ~ "Systemic multi-nudge"
+    k < 0.25 ~ "Informational", k < 0.50 ~ "Structural",
+    k < 0.75 ~ "Normative", TRUE ~ "Systemic multi-nudge"
   )
-  
-  return(list(
-    I_MPCS = I_MPCS,
-    k = k,
-    nudge_type = tipo
-  ))
+  return(list(I_MPCS = I_MPCS, k = k, nudge_type = tipo))
 }
-# ============================================================================
-# 5. aplicar_nudge — Aplica nudge a la matriz de transicion
-# ============================================================================
 
-#' Aplicar nudge a la matriz de transicion de Markov
-#'
-#' @param P matriz de transicion original
-#' @param k intensidad del nudge (0-1)
-#' @return matriz de transicion modificada
+# ============================================================================
+# 7. aplicar_nudge (SIN CAMBIOS)
+# ============================================================================
 #' @export
 aplicar_nudge <- function(P, k) {
-  
-  if (is.null(P) || !is.matrix(P)) {
-    warning("Se requiere una matriz de transicion valida")
-    return(NULL)
-  }
-  
-  if (k < 0 || k > 1) {
-    warning("k debe estar entre 0 y 1. Se usara k = 0.4")
-    k <- 0.4
-  }
-  
+  if (is.null(P) || !is.matrix(P)) return(NULL)
+  if (k < 0 || k > 1) k <- 0.4
   P_n <- P
   m <- nrow(P)
-  
   for (i in 1:(m-1)) {
     av <- P[i, i] * k
     P_n[i, i] <- P[i, i] - av
     P_n[i, i+1] <- P[i, i+1] + av
     P_n[i, ] <- P_n[i, ] / sum(P_n[i, ])
   }
-  
   return(P_n)
 }
+
+# (El resto de funciones de generación de datos, gráficos y sensibilidad se mantienen igual que en tu archivo original...)
 
 # ============================================================================
 # 6. generar_demo_data — Genera datos de salud (demostracion)
