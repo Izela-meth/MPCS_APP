@@ -1,14 +1,17 @@
 # =============================================================================
-# MPCS — COMPARATIVE ANALYSIS SOUTHERN PERU (FINAL VERSION WITH OPTION B)
+# MPCS — COMPARATIVE ANALYSIS SOUTHERN PERU (GENERALIZABLE)
 # =============================================================================
 # Regions: Apurímac, Arequipa, Cusco, Moquegua, Puno, Tacna
 # Source: ENDES 2024 — INEI Peru
-# =============================================================================
-# NOTE: This is the generalizable implementation. I_Markov is recalculated
-# from each region's empirical dist(0) and the transition matrix P, and may
-# differ from the published values (Hardcode script) by ~0.001 due to this
-# recalculation rather than using fixed literature-derived figures.
-
+#
+# NOTE: This is the generalizable implementation. The behavioral transition
+# probabilities (E2→E3, E3→E4, E4→E5) are estimated from each region's data
+# using estimar_tasas_transversal(). The E1→E2 transition is calibrated at
+# 0.20 (diagnostic event, not behavioral transition; see manuscript Module 2).
+# Outputs differ from the published values (Hardcode script, which uses
+# calibrated rates t1=0.48, t2=0.89, t3=0.62) by 0.001–0.012, reflecting
+# the difference between per-region estimates and calibrated rates. The
+# nudge-type classification (Normative) is identical in both versions.
 
 # --- PACKAGES ---
 paquetes <- c("haven", "dplyr", "tidyr", "ggplot2", "igraph",
@@ -21,15 +24,11 @@ library(ggplot2); library(igraph); library(scales); library(gridExtra)
 library(patchwork)
 
 # =============================================================================
-# CONFIGURATION — CAMBIA LAS RUTAS AQUÍ
+# CONFIGURATION
 # =============================================================================
-
-# --- CONFIGURATION: Set paths here ---
-# Option A: Relative paths (recommended for reproducibility)
 ruta_csalud <- "data/CSALUD01_2024.dta"
 ruta_rech0  <- "data/RECH0_2024.dta"
 
-# Option B: Manual selection if files are not in data/ folder
 if (!file.exists(ruta_csalud)) {
   cat("File not found. Please select CSALUD01_2024.dta manually...\n")
   ruta_csalud <- file.choose()
@@ -39,7 +38,6 @@ if (!file.exists(ruta_rech0)) {
   ruta_rech0 <- file.choose()
 }
 
-# --- Regiones ---
 regiones_sur <- list(
   list(codigo = 3,  nombre = "Apurimac"),
   list(codigo = 4,  nombre = "Arequipa"),
@@ -48,6 +46,58 @@ regiones_sur <- list(
   list(codigo = 21, nombre = "Puno"),
   list(codigo = 23, nombre = "Tacna")
 )
+
+# =============================================================================
+# FUNCIÓN: estimar_tasas_transversal
+# Devuelve m-1 tasas: t1 (E1→E2), t2 (E2→E3), t3 (E3→E4), t4 (E4→E5)
+# =============================================================================
+estimar_tasas_transversal <- function(estados, orden_estados = NULL,
+                                      pesos = NULL) {
+  estados <- as.character(estados)
+  validos <- !is.na(estados) & estados != ""
+  estados <- estados[validos]
+  if (!is.null(pesos)) pesos <- pesos[validos]
+  if (length(estados) < 30) stop("Se requieren al menos 30 observaciones válidas")
+  if (is.null(orden_estados)) stop("Debe proporcionar orden_estados")
+  m <- length(orden_estados)
+  if (m < 3) stop("Se requieren al menos 3 estados")
+  if (is.null(pesos)) pesos <- rep(1, length(estados))
+  if (length(pesos) != length(estados)) stop("pesos y estados deben tener igual longitud")
+  
+  n <- sapply(orden_estados, function(e) sum(pesos[estados == e], na.rm = TRUE))
+  names(n) <- orden_estados
+  
+  tasas <- numeric(m - 1)
+  for (j in 1:(m - 1)) {
+    denom <- sum(n[j:m])
+    num   <- sum(n[(j + 1):m])
+    tasas[j] <- if (denom > 0) num / denom else NA_real_
+  }
+  names(tasas) <- paste0("t", 1:(m - 1))
+  
+  list(tasas = tasas, conteos = n, orden = orden_estados, n_total = sum(n))
+}
+
+# =============================================================================
+# FUNCIÓN: construir_matriz_P
+# =============================================================================
+construir_matriz_P <- function(t1, t2, t3, t4, estados_orden) {
+  P <- matrix(0, 5, 5, dimnames = list(estados_orden, estados_orden))
+  P[1, ] <- c(0,     t1,   0.04,  0.01,  0.00)
+  P[2, ] <- c(0.05,  0,    t2,    0.02,  0.00)
+  P[3, ] <- c(0.01,  0.09, 0,     t3,    0.005)
+  P[4, ] <- c(0.005, 0.01, 0.08,  0,     t4)
+  P[5, ] <- c(0.00,  0.01, 0.02,  0.10,  0.87)
+  
+  for (i in 1:5) {
+    P[i, i] <- 1 - sum(P[i, -i])
+    if (P[i, i] < 0) {
+      P[i, -i] <- P[i, -i] / sum(P[i, -i]) * 0.99
+      P[i, i] <- 0.01
+    }
+  }
+  P
+}
 
 # =============================================================================
 # FUNCIÓN: graficar_arbol_markov
@@ -162,16 +212,23 @@ graficar_juego_evolutivo <- function(alpha, p_star, titulo = "Replicator Dynamic
 
 # =============================================================================
 # FUNCIÓN PRINCIPAL: procesar_region
+# Acepta:
+#   - tasas_forzadas = NULL  → estima 4 tasas
+#   - tasas_forzadas de long 4 → usa esas 4 tasas
+#   - tasas_forzadas de long 3 → usa 3 tasas + E1→E2=0.20 fija (estilo hardcode)
 # =============================================================================
-procesar_region <- function(df_raw, codigo_region, nombre_region, horizonte = 10, umbral = 0.10) {
+procesar_region <- function(df_raw, codigo_region, nombre_region,
+                            horizonte = 10, umbral = 0.10,
+                            tasas_forzadas = NULL,
+                            a_AA = NULL, a_AR = NULL, a_RA = NULL, a_RR = NULL,
+                            verbose = TRUE) {
   
-  cat(sprintf(">> Processing: %s (HV023 = %d)...\n", nombre_region, codigo_region))
+  if (verbose) cat(sprintf(">> Processing: %s (HV023 = %d)...\n", nombre_region, codigo_region))
   
   df_reg <- df_raw %>% filter(HV023 == codigo_region)
   n_total <- nrow(df_reg)
-  cat(sprintf("   n = %d individuals\n", n_total))
+  if (verbose) cat(sprintf("   n = %d individuals\n", n_total))
   
-  # --- Variables ---
   df <- df_reg %>%
     select(HHID, QHCLUSTER, QSSEXO, QS23, QS25N, QS26,
            QS100, QS102, QS104, QS106, QS107, QS109, QS111, QS113,
@@ -181,353 +238,6 @@ procesar_region <- function(df_raw, codigo_region, nombre_region, horizonte = 10
            PESO15_AMAS) %>%
     mutate(across(where(is.numeric), ~ifelse(. %in% c(8,9,98,99,998,999,9998), NA, .)))
   
-  # --- Feature engineering ---
-  df <- df %>%
-    mutate(
-      IMC = ifelse(!is.na(QS900) & !is.na(QS901) & QS901 > 0, QS900 / (QS901/100)^2, NA),
-      PAS_prom = rowMeans(cbind(QS903S, QS905S), na.rm=TRUE),
-      PAD_prom = rowMeans(cbind(QS903D, QS905D), na.rm=TRUE),
-      HTA_medida = case_when(PAS_prom >= 140 | PAD_prom >= 90 ~ 1, !is.na(PAS_prom) ~ 0, TRUE ~ NA_real_),
-      Obesidad_abd = case_when(QSSEXO==1 & QS907>=94 ~ 1, QSSEXO==2 & QS907>=80 ~ 1, !is.na(QS907) ~ 0, TRUE ~ NA_real_),
-      Dx_HTA = ifelse(QS102==1, 1, ifelse(QS102==2, 0, NA)),
-      Dx_DM = ifelse(QS109==1, 1, ifelse(QS109==2, 0, NA)),
-      Dx_cualquiera = ifelse(!is.na(Dx_HTA) | !is.na(Dx_DM), pmax(Dx_HTA, Dx_DM, na.rm=TRUE), NA),
-      Adh_HTA = ifelse(QS106==1, 1, ifelse(QS106==2, 0, NA)),
-      Adh_DM = ifelse(QS113==1, 1, ifelse(QS113==2, 0, NA)),
-      Adh_farma = case_when(Dx_HTA==1 & Dx_DM==1 ~ rowMeans(cbind(Adh_HTA, Adh_DM), na.rm=TRUE),
-                            Dx_HTA==1 ~ Adh_HTA, Dx_DM==1 ~ Adh_DM, TRUE ~ NA_real_),
-      Compra_med = case_when(QS104==1 | QS111==1 ~ 1, Dx_cualquiera==1 ~ 0, TRUE ~ NA_real_),
-      Tiene_seguro = ifelse(QS26==1, 1, ifelse(QS26==2, 0, NA)),
-      Control_PA = ifelse(QS100==1, 1, ifelse(QS100==2, 0, NA)),
-      Control_gluc = ifelse(QS107==1, 1, ifelse(QS107==2, 0, NA)),
-      Acceso_salud = rowMeans(cbind(Tiene_seguro, Control_PA, Control_gluc), na.rm=TRUE),
-      Fuma = ifelse(QS200==1, 1, ifelse(QS200==2, 0, NA)),
-      Alcohol = ifelse(QS208==1, 1, ifelse(QS208==2, 0, NA)),
-      Come_frutas = ifelse(!is.na(QS213U) & QS213U==1, 1, 0),
-      Come_verduras = ifelse(!is.na(QS219U) & QS219U==1, 1, 0),
-      Dieta_sana = rowMeans(cbind(Come_frutas, Come_verduras), na.rm=TRUE),
-      Depresion_sx = rowMeans(cbind(QS700A, QS700B, QS700D), na.rm=TRUE),
-      Depresion_bin = ifelse(!is.na(Depresion_sx), as.integer(Depresion_sx>=1), NA),
-      Educ_alta = ifelse(!is.na(QS25N), as.integer(QS25N>=3), NA)
-    )
-  
-  # --- Markov states ---
-  df <- df %>%
-    mutate(Estado_Markov = case_when(
-      Dx_cualquiera==1 & Adh_farma==1 & !is.na(HTA_medida) & HTA_medida==0 ~ "E5_Control",
-      Dx_cualquiera==1 & Adh_farma==1 ~ "E4_Adherencia_plena",
-      Dx_cualquiera==1 & Compra_med==1 & (is.na(Adh_farma) | Adh_farma<1) ~ "E3_Adherencia_parcial",
-      Dx_cualquiera==1 & (is.na(Compra_med) | Compra_med==0) ~ "E2_Sin_adherencia",
-      (is.na(Dx_cualquiera) | Dx_cualquiera==0) ~ "E1_Sin_diagnostico",
-      TRUE ~ NA_character_
-    ))
-  
-  estados_orden <- c("E1_Sin_diagnostico","E2_Sin_adherencia","E3_Adherencia_parcial","E4_Adherencia_plena","E5_Control")
-  
-  tabla_est <- df %>%
-    filter(!is.na(Estado_Markov)) %>%
-    count(Estado_Markov) %>%
-    mutate(Pct = round(n/sum(n)*100, 1)) %>%
-    arrange(Estado_Markov)
-  
-  # --- Alpha (context) ---
-  alpha <- mean(df$Acceso_salud, na.rm = TRUE)
-  if (is.na(alpha) || is.nan(alpha)) alpha <- 0.60
-  
-  a_AA <- 2.0; a_AR <- -(0.5 + 0.5 * (1 - alpha))
-  a_RA <- 0.5 + 0.5 * alpha; a_RR <- 0.5 + 0.5 * (1 - alpha)
-  p_estrella <- max(0, min(1, (a_RR - a_AR) / (a_AA - a_AR - a_RA + a_RR)))
-  I_juegos <- p_estrella
-  
-  # --- Graph ---
-  vars_grafo <- c("Dx_HTA","Dx_DM","Adh_farma","HTA_medida","IMC",
-                  "Obesidad_abd","Acceso_salud","Fuma","Alcohol",
-                  "Dieta_sana","Depresion_bin","Educ_alta","Tiene_seguro")
-  
-  mat_cor <- df %>% select(all_of(vars_grafo)) %>% cor(use="pairwise.complete.obs", method="spearman")
-  
-  aristas_df <- which(abs(mat_cor) > umbral & mat_cor != 1, arr.ind=TRUE) %>%
-    as.data.frame() %>%
-    mutate(desde = rownames(mat_cor)[row], hasta = colnames(mat_cor)[col], peso = mat_cor[cbind(row,col)]) %>%
-    filter(row < col) %>% select(desde, hasta, peso)
-  
-  g <- graph_from_data_frame(aristas_df, directed=FALSE)
-  grado_max <- max(degree(g))
-  
-  centr <- data.frame(Variable = V(g)$name, Grado = degree(g), Intermediacion = betweenness(g, normalized = FALSE))
-  n_nodos <- vcount(g)
-  denom <- (n_nodos - 1) * (n_nodos - 2) / 2
-  centr$Intermediacion_norm <- if (denom > 0) centr$Intermediacion / denom else 0
-  centr$Impacto_nudge <- round(0.60 * centr$Intermediacion_norm + 0.40 * (centr$Grado / grado_max), 4)
-  centr <- centr %>% arrange(desc(Impacto_nudge))
-  
-  nodo_optimo <- centr$Variable[1]
-  indice_grafo <- centr$Impacto_nudge[1]
-  
-  # --- Graph plot ---
-  set.seed(42)
-  lay <- layout_with_fr(g, niter = 5000)
-  lay <- norm_coords(lay, ymin = -1, ymax = 1, xmin = -1, xmax = 1) * 2.4
-  
-  nombre_archivo <- paste0("behavioral_graph_", tolower(gsub(" ", "_", nombre_region)), ".png")
-  png(nombre_archivo, width = 1400, height = 1100, res = 150)
-  par(mar = c(4, 1, 4, 1))
-  V(g)$color <- ifelse(V(g)$name == nodo_optimo, "#C0392B", "#F0DFC0")
-  V(g)$size <- scales::rescale(centr$Impacto_nudge[match(V(g)$name, centr$Variable)], to = c(14, 30))
-  E(g)$color <- ifelse(E(g)$peso > 0, "#5B9BD5", "#D65B5B")
-  E(g)$width <- scales::rescale(abs(E(g)$peso), to = c(0.6, 3.2))
-  
-  plot(g, layout = lay, rescale = FALSE,
-       xlim = range(lay[, 1]) * 1.15, ylim = range(lay[, 2]) * 1.15,
-       vertex.frame.color = ifelse(V(g)$name == nodo_optimo, "#8B1E1E", "#B8A67A"),
-       vertex.label = V(g)$name, vertex.label.cex = 0.75,
-       vertex.label.color = "black", vertex.label.dist = 0,
-       edge.curved = 0.15, asp = 0)
-  title(main = paste0("Behavioral System Graph — MPCS ", nombre_region, " (ENDES 2024)"),
-        sub = paste0("Red node = optimal intervention point: ", nodo_optimo), cex.main = 1.1, cex.sub = 1.0)
-  mtext("Blue edges = positive correlation | Red = negative | Size = nudge impact",
-        side = 1, line = 2.5, cex = 0.8)
-  dev.off()
-  cat(sprintf("   Graph saved: %s\n", nombre_archivo))
-  
-  # --- Markov rates ---
-  t1 <- 0.48; t2 <- 0.89; t3 <- 0.62
-  
-  # --- Markov: distribution and matrix ---
-  dist_actual <- tabla_est %>% arrange(Estado_Markov) %>% pull(Pct) / 100
-  if (length(dist_actual) < 5) {
-    dist_completa <- setNames(rep(0,5), estados_orden)
-    dist_completa[tabla_est$Estado_Markov] <- dist_actual
-    dist_actual <- dist_completa
-  }
-  dist_actual <- dist_actual / sum(dist_actual)
-  
-  P_base <- matrix(c(
-    0.75, 0.20, 0.04, 0.01, 0.00,          # E1: 0.75+0.20+0.04+0.01+0.00 = 1.00
-    0.05, 0.45, 0.48, 0.02, 0.00,          # E2: 0.05+0.45+0.48+0.02+0.00 = 1.00
-    0.01, 0.09, 0.005, 0.89, 0.005,        # E3: 0.01+0.09+0.005+0.89+0.005 = 1.00 (t2=0.89 respetado)
-    0.005, 0.01, 0.08, 0.285, 0.62,        # E4: 0.005+0.01+0.08+0.285+0.62 = 1.00
-    0.00, 0.01, 0.02, 0.10, 0.87           # E5: 0.00+0.01+0.02+0.10+0.87 = 1.00
-  ), nrow = 5, byrow = TRUE, dimnames = list(estados_orden, estados_orden))
-  
-  # Normalizar filas para mantener matriz estocástica
-  P_base <- P_base / rowSums(P_base)
-  
-  simular <- function(P, v0, n=25) {
-    dist <- matrix(0, n+1, 5, dimnames=list(NULL, estados_orden))
-    dist[1,] <- v0
-    for (t in 2:(n+1)) dist[t,] <- dist[t-1,] %*% P
-    cbind(as.data.frame(dist), Periodo=0:n)
-  }
-  
-  sim_base <- simular(P_base, dist_actual)
-  
-  # --- I_Markov at horizon H ---
-  idx_h <- min(horizonte + 1, nrow(sim_base))
-  I_markov <- max(0, min(1, sim_base[idx_h, "E4_Adherencia_plena"] + sim_base[idx_h, "E5_Control"]))
-  
-  # --- MPCS Index ---
-  w <- c(0.35, 0.40, 0.25)
-  I_MPCS <- w[1]*indice_grafo + w[2]*I_markov + w[3]*I_juegos
-  
-  # --- k_rec (calculated BEFORE nudge simulation) ---
-  k_rec <- min(1, I_MPCS * 0.65 * 1.5)
-  
-  # --- Nudge type ---
-  tipo_nudge <- case_when(
-    k_rec < 0.25 ~ "Informational",
-    k_rec < 0.50 ~ "Structural",
-    k_rec < 0.75 ~ "Normative",
-    TRUE ~ "Systemic multi-nudge"
-  )
-  
-  # --- Nudge simulation (USA k_rec, no 0.4 fijo) ---
-  P_nudge <- P_base
-  for (i in 1:(nrow(P_nudge)-1)) {
-    av <- P_nudge[i, i] * k_rec
-    P_nudge[i, i] <- P_nudge[i, i] - av
-    P_nudge[i, i+1] <- P_nudge[i, i+1] + av
-    P_nudge[i, ] <- P_nudge[i, ] / sum(P_nudge[i, ])
-  }
-  sim_nudge <- simular(P_nudge, dist_actual)
-  
-  cat(sprintf("   α = %.3f | Optimal node: %s | I_MPCS = %.4f | Nudge: %s\n",
-              alpha, nodo_optimo, I_MPCS, tipo_nudge))
-  
-  # --- Additional plots ---
-  p_arbol <- graficar_arbol_markov(P_base, estados_orden, paste("Markov Transitions -", nombre_region))
-  if (!is.null(p_arbol)) {
-    ggsave(paste0("markov_tree_", tolower(gsub(" ", "_", nombre_region)), ".png"),
-           p_arbol, width = 10, height = 6, dpi = 150)
-    cat(sprintf("   Markov tree saved: markov_tree_%s.png\n", tolower(gsub(" ", "_", nombre_region))))
-  }
-  
-  p_juego <- graficar_juego_evolutivo(alpha, p_estrella, paste("Game Theory -", nombre_region))
-  if (!is.null(p_juego)) {
-    ggsave(paste0("game_theory_", tolower(gsub(" ", "_", nombre_region)), ".png"),
-           p_juego, width = 12, height = 6, dpi = 150)
-    cat(sprintf("   Game theory plot saved: game_theory_%s.png\n", tolower(gsub(" ", "_", nombre_region))))
-  }
-  
-  return(list(
-    Region = nombre_region,
-    N = n_total,
-    Alpha = round(alpha, 3),
-    Pct_E1 = ifelse("E1_Sin_diagnostico" %in% tabla_est$Estado_Markov, tabla_est$Pct[tabla_est$Estado_Markov == "E1_Sin_diagnostico"], 0),
-    Pct_E2 = ifelse("E2_Sin_adherencia" %in% tabla_est$Estado_Markov, tabla_est$Pct[tabla_est$Estado_Markov == "E2_Sin_adherencia"], 0),
-    Nodo_optimo = nodo_optimo,
-    I_Grafo = round(indice_grafo, 4),
-    I_Markov = round(I_markov, 4),
-    I_Juegos = round(I_juegos, 4),
-    I_MPCS = round(I_MPCS, 4),
-    k_rec = round(k_rec, 4),
-    Tipo_nudge = tipo_nudge,
-    sim_base = sim_base,
-    sim_nudge = sim_nudge,
-    dist_actual = dist_actual,
-    tabla_estados = tabla_est
-  ))
-}
-
-# =============================================================================
-# STEP 1: LOAD DATA
-# =============================================================================
-cat("\n=== LOADING DATA ===\n")
-df_raw <- read_dta(ruta_csalud)
-df_hogar <- read_dta(ruta_rech0)
-df_hogar_dep <- df_hogar %>% select(HHID, HV023)
-df_raw <- df_raw %>% left_join(df_hogar_dep, by = "HHID")
-cat(sprintf("Total national: %d records\n\n", nrow(df_raw)))
-
-# =============================================================================
-# STEP 2: PROCESS REGIONS
-# =============================================================================
-cat("\n=== PROCESSING 6 SOUTHERN REGIONS (H=10) ===\n\n")
-resultados <- lapply(regiones_sur, function(r) {
-  procesar_region(df_raw, r$codigo, r$nombre, horizonte = 10)
-})
-names(resultados) <- sapply(regiones_sur, function(r) r$nombre)
-
-# =============================================================================
-# STEP 3: COMPARATIVE TABLE
-# =============================================================================
-cat("\n=== COMPARATIVE TABLE — SOUTHERN PERU (H=10) ===\n\n")
-tabla_comp <- do.call(rbind, lapply(resultados, function(r) {
-  data.frame(
-    Region = r$Region,
-    N = r$N,
-    Alpha = r$Alpha,
-    Pct_E1_sin_dx = r$Pct_E1,
-    Pct_E2_sin_adh = r$Pct_E2,
-    Nodo_optimo = r$Nodo_optimo,
-    I_Grafo = r$I_Grafo,
-    I_Markov = r$I_Markov,
-    I_Juegos = r$I_Juegos,
-    I_MPCS = r$I_MPCS,
-    k_rec = r$k_rec,
-    Tipo_nudge = r$Tipo_nudge,
-    stringsAsFactors = FALSE
-  )
-}))
-print(tabla_comp)
-write.csv(tabla_comp, "MPCS_comparative_table_south_H10.csv", row.names = FALSE, fileEncoding = "UTF-8")
-cat("\n>> Table saved: MPCS_comparative_table_south_H10.csv\n")
-
-# =============================================================================
-# STEP 4: TRAJECTORIES PLOT (COMPARATIVE)
-# =============================================================================
-cat("\n=== GENERATING COMPARATIVE TRAJECTORIES ===\n")
-
-# --- Preparar datos de trayectorias ---
-tray_comp <- do.call(rbind, lapply(resultados, function(r) {
-  # Base (sin nudge)
-  df_base <- as.data.frame(r$sim_base)
-  df_base$Periodo <- 0:(nrow(df_base) - 1)
-  df_base$Region <- r$Region
-  df_base$Condicion <- "Without nudge"
-  df_base$Adherencia <- df_base$E4_Adherencia_plena + df_base$E5_Control
-  
-  # Nudge (con nudge)
-  df_nudge <- as.data.frame(r$sim_nudge)
-  df_nudge$Periodo <- 0:(nrow(df_nudge) - 1)
-  df_nudge$Region <- r$Region
-  df_nudge$Condicion <- "With nudge"
-  df_nudge$Adherencia <- df_nudge$E4_Adherencia_plena + df_nudge$E5_Control
-  
-  bind_rows(df_base, df_nudge)
-}))
-
-# --- Gráfico de trayectorias comparativas ---
-p_tray <- ggplot(tray_comp, aes(x = Periodo, y = Adherencia,
-                                color = Region, linetype = Condicion)) +
-  geom_line(linewidth = 1.1) +
-  geom_vline(xintercept = 10, linetype = "dashed", color = "gray50", alpha = 0.5) +
-  annotate("text", x = 10.5, y = 0.95, label = "H = 10", size = 3.5, color = "gray50") +
-  facet_wrap(~Condicion) +
-  scale_color_manual(values = c(
-    "#E74C3C", "#E67E22", "#2E86AB", "#1A8754", "#8E44AD", "#F39C12"
-  )) +
-  scale_y_continuous(labels = percent_format()) +
-  labs(title = "Adherence Trajectories — Southern Peru (H=10)",
-       subtitle = "Markov Chains MPCS · ENDES 2024",
-       x = "Period", y = "P(Full adherence + Control)",
-       color = "Region", linetype = "Condition") +
-  theme_minimal(base_size = 12) +
-  theme(legend.position = "bottom",
-        axis.text.x = element_text(angle = 45, hjust = 1))
-
-ggsave("MPCS_trajectories_comparative_H10.png", p_tray,
-       width = 13, height = 7, dpi = 150)
-cat(">> Plot saved: MPCS_trajectories_comparative_H10.png\n")
-
-# =============================================================================
-# FINAL SUMMARY
-# =============================================================================
-cat("\n")
-cat("╔════════════════════════════════════════════════════════════════════════════════╗\n")
-cat("║          COMPARATIVE MPCS SUMMARY — SOUTHERN PERU (ENDES 2024)                 ║\n")
-cat("╠════════════════════════════════════════════════════════════════════════════════╣\n")
-cat(sprintf("║  %-12s  %5s  %6s  %8s  %10s  %8s  %-20s║\n",
-            "Region", "N", "α", "I_MPCS", "Node", "Nudge k", "Nudge type"))
-cat("╠════════════════════════════════════════════════════════════════════════════════╣\n")
-for (i in 1:nrow(tabla_comp)) {
-  r <- tabla_comp[i,]
-  cat(sprintf("║  %-12s  %5d  %.3f  %.4f    %-10s  %.4f   %-20s║\n",
-              r$Region, r$N, r$Alpha, r$I_MPCS,
-              substr(r$Nodo_optimo, 1, 10), r$k_rec,
-              substr(r$Tipo_nudge, 1, 20)))
-}
-cat("╚════════════════════════════════════════════════════════════════════════════════╝\n")
-
-cat("\n✅ SCRIPT COMPLETED\n")
-
-# =============================================================================
-# SENSITIVITY FIGURES AND TABLES FOR THE ARTICLE
-# =============================================================================
-
-cat("\n=== GENERANDO FIGURAS Y TABLAS FALTANTES DEL ARTÍCULO ===\n")
-
-# ---------------------------------------------------------------------------
-# FUNCIÓN AUXILIAR: cálculo numérico MPCS sin generar archivos PNG
-# ---------------------------------------------------------------------------
-calcular_mpcs_numerico <- function(df_raw, codigo_region, nombre_region, 
-                                   horizonte = 10, umbral = 0.10,
-                                   t1 = 0.48, t2 = 0.89, t3 = 0.62,
-                                   a_AA = NULL, a_AR = NULL, a_RA = NULL, a_RR = NULL) {
-  
-  df_reg <- df_raw %>% filter(HV023 == codigo_region)
-  
-  # --- Feature engineering (idéntico a procesar_region) ---
-  df <- df_reg %>%
-    select(HHID, QHCLUSTER, QSSEXO, QS23, QS25N, QS26,
-           QS100, QS102, QS104, QS106, QS107, QS109, QS111, QS113,
-           QS200, QS208, QS213U, QS219U,
-           QS700A, QS700B, QS700D,
-           QS900, QS901, QS903S, QS903D, QS905S, QS905D, QS907) %>%
-    mutate(across(where(is.numeric), ~ifelse(. %in% c(8,9,98,99,998,999,9998), NA, .)))
-  
-  # --- Feature engineering (identical to procesar_region, so that the
-  # 13-variable graph set below is fully reproducible) ---
   df <- df %>%
     mutate(
       IMC = ifelse(!is.na(QS900) & !is.na(QS901) & QS901 > 0, QS900 / (QS901/100)^2, NA),
@@ -576,52 +286,73 @@ calcular_mpcs_numerico <- function(df_raw, codigo_region, nombre_region,
     mutate(Pct = round(n/sum(n)*100, 1)) %>%
     arrange(Estado_Markov)
   
-  # --- Alpha ---
   alpha <- mean(df$Acceso_salud, na.rm = TRUE)
   if (is.na(alpha) || is.nan(alpha)) alpha <- 0.60
   
-  # --- Juegos ---
   if (is.null(a_AA)) a_AA <- 2.0
   if (is.null(a_AR)) a_AR <- -(0.5 + 0.5 * (1 - alpha))
   if (is.null(a_RA)) a_RA <- 0.5 + 0.5 * alpha
   if (is.null(a_RR)) a_RR <- 0.5 + 0.5 * (1 - alpha)
-  I_juegos <- max(0, min(1, (a_RR - a_AR) / (a_AA - a_AR - a_RA + a_RR)))
+  p_estrella <- max(0, min(1, (a_RR - a_AR) / (a_AA - a_AR - a_RA + a_RR)))
+  I_juegos <- p_estrella
   
-  # --- Grafo ---
   vars_grafo <- c("Dx_HTA","Dx_DM","Adh_farma","HTA_medida","IMC",
                   "Obesidad_abd","Acceso_salud","Fuma","Alcohol",
                   "Dieta_sana","Depresion_bin","Educ_alta","Tiene_seguro")
-  df_grafo <- df %>% select(all_of(vars_grafo))
-  df_grafo <- df_grafo[, colSums(is.na(df_grafo)) < nrow(df_grafo)*0.5, drop=FALSE]
   
-  if (ncol(df_grafo) >= 3) {
-    mat_cor <- cor(df_grafo, use="pairwise.complete.obs", method="spearman")
-    aristas_df <- which(abs(mat_cor) > umbral & mat_cor != 1, arr.ind=TRUE) %>%
-      as.data.frame() %>%
-      mutate(desde = rownames(mat_cor)[row], hasta = colnames(mat_cor)[col], peso = mat_cor[cbind(row,col)]) %>%
-      filter(row < col) %>% select(desde, hasta, peso)
-    
-    if (nrow(aristas_df) > 0) {
-      g <- graph_from_data_frame(aristas_df, directed=FALSE)
-      grado_max <- max(degree(g))
-      centr <- data.frame(Variable = V(g)$name, Grado = degree(g), 
-                          Intermediacion = betweenness(g, normalized = FALSE))
-      n_nodos <- vcount(g)
-      denom <- (n_nodos - 1) * (n_nodos - 2) / 2
-      centr$Intermediacion_norm <- if (denom > 0) centr$Intermediacion / denom else 0
-      centr$Impacto_nudge <- round(0.60 * centr$Intermediacion_norm + 
-                                     0.40 * (centr$Grado / grado_max), 4)
-      centr <- centr %>% arrange(desc(Impacto_nudge))
-      nodo_optimo <- centr$Variable[1]
-      indice_grafo <- centr$Impacto_nudge[1]
-    } else {
-      nodo_optimo <- NA; indice_grafo <- 0.5
-    }
+  mat_cor <- df %>% select(all_of(vars_grafo)) %>% cor(use="pairwise.complete.obs", method="spearman")
+  
+  aristas_df <- which(abs(mat_cor) > umbral & mat_cor != 1, arr.ind=TRUE) %>%
+    as.data.frame() %>%
+    mutate(desde = rownames(mat_cor)[row], hasta = colnames(mat_cor)[col], peso = mat_cor[cbind(row,col)]) %>%
+    filter(row < col) %>% select(desde, hasta, peso)
+  
+  g <- graph_from_data_frame(aristas_df, directed=FALSE)
+  grado_max <- max(degree(g))
+  
+  centr <- data.frame(Variable = V(g)$name, Grado = degree(g), Intermediacion = betweenness(g, normalized = FALSE))
+  n_nodos <- vcount(g)
+  denom <- (n_nodos - 1) * (n_nodos - 2) / 2
+  centr$Intermediacion_norm <- if (denom > 0) centr$Intermediacion / denom else 0
+  centr$Impacto_nudge <- round(0.60 * centr$Intermediacion_norm + 0.40 * (centr$Grado / grado_max), 4)
+  centr <- centr %>% arrange(desc(Impacto_nudge))
+  
+  nodo_optimo <- centr$Variable[1]
+  indice_grafo <- centr$Impacto_nudge[1]
+  
+  # --- Tasas: forzadas (3 o 4) o estimadas ---
+  if (!is.null(tasas_forzadas) && length(tasas_forzadas) == 3) {
+    t1 <- 0.20
+    t2 <- tasas_forzadas[1]
+    t3 <- tasas_forzadas[2]
+    t4 <- tasas_forzadas[3]
+    if (verbose) cat(sprintf("   Tasas FORZADAS (3): E1→E2=0.20  E2→E3=%.4f  E3→E4=%.4f  E4→E5=%.4f\n",
+                             t2, t3, t4))
+  } else if (!is.null(tasas_forzadas) && length(tasas_forzadas) == 4) {
+    t1 <- tasas_forzadas[1]
+    t2 <- tasas_forzadas[2]
+    t3 <- tasas_forzadas[3]
+    t4 <- tasas_forzadas[4]
+    if (verbose) cat(sprintf("   Tasas FORZADAS (4): E1→E2=%.4f  E2→E3=%.4f  E3→E4=%.4f  E4→E5=%.4f\n",
+                             t1, t2, t3, t4))
   } else {
-    nodo_optimo <- NA; indice_grafo <- 0.5
+    res_tasas <- estimar_tasas_transversal(
+      estados       = df$Estado_Markov,
+      orden_estados = estados_orden,
+      pesos         = if ("PESO15_AMAS" %in% names(df)) df$PESO15_AMAS else NULL
+    )
+    # t1 (E1→E2) es un evento de diagnóstico, no una transición de comportamiento.
+    # La fórmula de proporciones secuenciales estima la probabilidad de estar
+    # diagnosticado en la población total (~0.11-0.15), no la probabilidad
+    # condicional a tener la condición. Se calibra a 0.20 (ENDES 2024).
+    t1 <- 0.20
+    t2 <- res_tasas$tasas[2]   # E2→E3
+    t3 <- res_tasas$tasas[3]   # E3→E4
+    t4 <- res_tasas$tasas[4]   # E4→E5
+    if (verbose) cat(sprintf("   Tasas: t1(E1→E2)=0.2000 (calibrada)  t2=%.4f  t3=%.4f  t4=%.4f  (n=%.0f)\n",
+                             t2, t3, t4, res_tasas$n_total))
   }
   
-  # --- Markov ---
   dist_actual <- tabla_est %>% arrange(Estado_Markov) %>% pull(Pct) / 100
   if (length(dist_actual) < 5) {
     dist_completa <- setNames(rep(0,5), estados_orden)
@@ -630,15 +361,7 @@ calcular_mpcs_numerico <- function(df_raw, codigo_region, nombre_region,
   }
   dist_actual <- dist_actual / sum(dist_actual)
   
-  P_base <- matrix(c(
-    0.75, 0.20, 0.04, 0.01, 0.00,
-    0.05, 0.45, t1,   0.02, 0.00,
-    0.01, 0.09, 0.005,t2,   0.005,
-    0.005,0.01, 0.08, 0.285,t3,
-    0.00, 0.01, 0.02, 0.10, 0.87
-  ), nrow = 5, byrow = TRUE, dimnames = list(estados_orden, estados_orden))
-  
-  # Normalizar filas para mantener matriz estocástica
+  P_base <- construir_matriz_P(t1, t2, t3, t4, estados_orden)
   P_base <- P_base / rowSums(P_base)
   
   simular <- function(P, v0, n=25) {
@@ -652,22 +375,39 @@ calcular_mpcs_numerico <- function(df_raw, codigo_region, nombre_region,
   idx_h <- min(horizonte + 1, nrow(sim_base))
   I_markov <- max(0, min(1, sim_base[idx_h, "E4_Adherencia_plena"] + sim_base[idx_h, "E5_Control"]))
   
-  # --- MPCS ---
   w <- c(0.35, 0.40, 0.25)
   I_MPCS <- w[1]*indice_grafo + w[2]*I_markov + w[3]*I_juegos
+  # k = intensidad del nudge (Eq. 13: k = min(1, I_MPCS * R * 1.5), R = 0.65)
   k_rec <- min(1, I_MPCS * 0.65 * 1.5)
   
+  # La clasificación de la Tabla 4 se aplica sobre I_MPCS, no sobre k.
   tipo_nudge <- case_when(
-    k_rec < 0.25 ~ "Informational",
-    k_rec < 0.50 ~ "Structural",
-    k_rec < 0.75 ~ "Normative",
+    I_MPCS < 0.25 ~ "Informational",
+    I_MPCS < 0.50 ~ "Structural",
+    I_MPCS < 0.75 ~ "Normative",
     TRUE ~ "Systemic multi-nudge"
   )
   
+  P_nudge <- P_base
+  for (i in 1:(nrow(P_nudge)-1)) {
+    av <- P_nudge[i, i] * k_rec
+    P_nudge[i, i] <- P_nudge[i, i] - av
+    P_nudge[i, i+1] <- P_nudge[i, i+1] + av
+    P_nudge[i, ] <- P_nudge[i, ] / sum(P_nudge[i, ])
+  }
+  sim_nudge <- simular(P_nudge, dist_actual)
+  
+  if (verbose) {
+    cat(sprintf("   α = %.3f | Optimal node: %s | I_MPCS = %.4f | Nudge: %s\n",
+                alpha, nodo_optimo, I_MPCS, tipo_nudge))
+  }
+  
   return(list(
     Region = nombre_region,
-    N = nrow(df_reg),
+    N = n_total,
     Alpha = round(alpha, 3),
+    Pct_E1 = ifelse("E1_Sin_diagnostico" %in% tabla_est$Estado_Markov, tabla_est$Pct[tabla_est$Estado_Markov == "E1_Sin_diagnostico"], 0),
+    Pct_E2 = ifelse("E2_Sin_adherencia" %in% tabla_est$Estado_Markov, tabla_est$Pct[tabla_est$Estado_Markov == "E2_Sin_adherencia"], 0),
     Nodo_optimo = nodo_optimo,
     I_Grafo = round(indice_grafo, 4),
     I_Markov = round(I_markov, 4),
@@ -675,13 +415,155 @@ calcular_mpcs_numerico <- function(df_raw, codigo_region, nombre_region,
     I_MPCS = round(I_MPCS, 4),
     k_rec = round(k_rec, 4),
     Tipo_nudge = tipo_nudge,
+    sim_base = sim_base,
+    sim_nudge = sim_nudge,
+    dist_actual = dist_actual,
     tabla_estados = tabla_est,
-    dist_actual = dist_actual
+    tasas = c(t1, t2, t3, t4),
+    df = df
   ))
 }
 
 # =============================================================================
-# FIGURA 1: Ranking I_MPCS (barras horizontales)
+# STEP 1: LOAD DATA
+# =============================================================================
+cat("\n=== LOADING DATA ===\n")
+df_raw <- read_dta(ruta_csalud)
+df_hogar <- read_dta(ruta_rech0)
+df_hogar_dep <- df_hogar %>% select(HHID, HV023)
+df_raw <- df_raw %>% left_join(df_hogar_dep, by = "HHID")
+cat(sprintf("Total national: %d records\n\n", nrow(df_raw)))
+
+# =============================================================================
+# STEP 2: PROCESS REGIONS (estimación per-región de 4 tasas)
+# =============================================================================
+cat("\n=== PROCESSING 6 SOUTHERN REGIONS (H=10) ===\n\n")
+resultados <- lapply(regiones_sur, function(r) {
+  procesar_region(df_raw, r$codigo, r$nombre, horizonte = 10)
+})
+names(resultados) <- sapply(regiones_sur, function(r) r$nombre)
+
+# =============================================================================
+# STEP 3: COMPARATIVE TABLE
+# =============================================================================
+cat("\n=== COMPARATIVE TABLE — SOUTHERN PERU (H=10) ===\n\n")
+tabla_comp <- do.call(rbind, lapply(resultados, function(r) {
+  data.frame(
+    Region = r$Region,
+    N = r$N,
+    Alpha = r$Alpha,
+    Pct_E1_sin_dx = r$Pct_E1,
+    Pct_E2_sin_adh = r$Pct_E2,
+    t1_E1E2 = round(r$tasas[1], 4),
+    t2_E2E3 = round(r$tasas[2], 4),
+    t3_E3E4 = round(r$tasas[3], 4),
+    t4_E4E5 = round(r$tasas[4], 4),
+    Nodo_optimo = r$Nodo_optimo,
+    I_Grafo = r$I_Grafo,
+    I_Markov = r$I_Markov,
+    I_Juegos = r$I_Juegos,
+    I_MPCS = r$I_MPCS,
+    k_rec = r$k_rec,
+    Tipo_nudge = r$Tipo_nudge,
+    stringsAsFactors = FALSE
+  )
+}))
+print(tabla_comp)
+write.csv(tabla_comp, "MPCS_comparative_table_south_H10.csv", row.names = FALSE, fileEncoding = "UTF-8")
+cat("\n>> Table saved: MPCS_comparative_table_south_H10.csv\n")
+
+# =============================================================================
+# STEP 4: TRAJECTORIES PLOT
+# =============================================================================
+cat("\n=== GENERATING COMPARATIVE TRAJECTORIES ===\n")
+
+tray_comp <- do.call(rbind, lapply(resultados, function(r) {
+  df_base <- as.data.frame(r$sim_base)
+  df_base$Periodo <- 0:(nrow(df_base) - 1)
+  df_base$Region <- r$Region
+  df_base$Condicion <- "Without nudge"
+  df_base$Adherencia <- df_base$E4_Adherencia_plena + df_base$E5_Control
+  
+  df_nudge <- as.data.frame(r$sim_nudge)
+  df_nudge$Periodo <- 0:(nrow(df_nudge) - 1)
+  df_nudge$Region <- r$Region
+  df_nudge$Condicion <- "With nudge"
+  df_nudge$Adherencia <- df_nudge$E4_Adherencia_plena + df_nudge$E5_Control
+  
+  bind_rows(df_base, df_nudge)
+}))
+
+p_tray <- ggplot(tray_comp, aes(x = Periodo, y = Adherencia,
+                                color = Region, linetype = Condicion)) +
+  geom_line(linewidth = 1.1) +
+  geom_vline(xintercept = 10, linetype = "dashed", color = "gray50", alpha = 0.5) +
+  annotate("text", x = 10.5, y = 0.95, label = "H = 10", size = 3.5, color = "gray50") +
+  facet_wrap(~Condicion) +
+  scale_color_manual(values = c(
+    "#E74C3C", "#E67E22", "#2E86AB", "#1A8754", "#8E44AD", "#F39C12"
+  )) +
+  scale_y_continuous(labels = percent_format()) +
+  labs(title = "Adherence Trajectories — Southern Peru (H=10)",
+       subtitle = "Markov Chains MPCS · ENDES 2024 · per-region estimated rates",
+       x = "Period", y = "P(Full adherence + Control)",
+       color = "Region", linetype = "Condition") +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggsave("MPCS_trajectories_comparative_H10.png", p_tray,
+       width = 13, height = 7, dpi = 150)
+cat(">> Plot saved: MPCS_trajectories_comparative_H10.png\n")
+
+# =============================================================================
+# FINAL SUMMARY
+# =============================================================================
+cat("\n")
+cat("╔════════════════════════════════════════════════════════════════════════════════╗\n")
+cat("║          COMPARATIVE MPCS SUMMARY — SOUTHERN PERU (ENDES 2024)                 ║\n")
+cat("╠════════════════════════════════════════════════════════════════════════════════╣\n")
+cat(sprintf("║  %-12s  %5s  %6s  %8s  %10s  %8s  %-20s║\n",
+            "Region", "N", "α", "I_MPCS", "Node", "Nudge k", "Nudge type"))
+cat("╠════════════════════════════════════════════════════════════════════════════════╣\n")
+for (i in 1:nrow(tabla_comp)) {
+  r <- tabla_comp[i,]
+  cat(sprintf("║  %-12s  %5d  %.3f  %.4f    %-10s  %.4f   %-20s║\n",
+              r$Region, r$N, r$Alpha, r$I_MPCS,
+              substr(r$Nodo_optimo, 1, 10), r$k_rec,
+              substr(r$Tipo_nudge, 1, 20)))
+}
+cat("╚════════════════════════════════════════════════════════════════════════════════╝\n")
+
+cat("\n✅ SCRIPT COMPLETED\n")
+
+# =============================================================================
+# SENSITIVITY ANALYSIS
+# =============================================================================
+cat("\n=== GENERANDO FIGURAS Y TABLAS DE SENSIBILIDAD ===\n")
+
+# ---------------------------------------------------------------------------
+# Wrapper limpio
+# ---------------------------------------------------------------------------
+calcular_mpcs_numerico <- function(df_raw, codigo_region, nombre_region,
+                                   horizonte = 10, umbral = 0.10,
+                                   tasas_forzadas = NULL,
+                                   a_AA = NULL, a_AR = NULL, a_RA = NULL, a_RR = NULL) {
+  res <- procesar_region(df_raw, codigo_region, nombre_region,
+                         horizonte = horizonte, umbral = umbral,
+                         tasas_forzadas = tasas_forzadas,
+                         a_AA = a_AA, a_AR = a_AR, a_RA = a_RA, a_RR = a_RR,
+                         verbose = FALSE)
+  list(
+    Region = res$Region, N = res$N, Alpha = res$Alpha,
+    Nodo_optimo = res$Nodo_optimo, I_Grafo = res$I_Grafo,
+    I_Markov = res$I_Markov, I_Juegos = res$I_Juegos,
+    I_MPCS = res$I_MPCS, k_rec = res$k_rec, Tipo_nudge = res$Tipo_nudge,
+    tasas = res$tasas
+  )
+}
+
+# =============================================================================
+# FIGURA 1
 # =============================================================================
 cat("\n>> Generando Figura 1...\n")
 
@@ -698,7 +580,7 @@ p_fig1 <- ggplot(tabla_comp, aes(x = reorder(Region, I_MPCS), y = I_MPCS, fill =
   coord_flip() +
   labs(
     title = "MPCS Index by region, southern Peru (H=10)",
-    subtitle = "ENDES 2024 · α = health access indicator",
+    subtitle = "ENDES 2024 · α = health access indicator · per-region estimated rates",
     x = "", y = "MPCS Index",
     fill = "Recommended nudge type"
   ) +
@@ -714,7 +596,7 @@ ggsave("Figure1_MPCS_ranking_H10.png", p_fig1, width = 11, height = 7, dpi = 300
 cat("   Figura 1 guardada: Figure1_MPCS_ranking_H10.png\n")
 
 # =============================================================================
-# FIGURA 2: Distribución de estados por región
+# FIGURA 2
 # =============================================================================
 cat("\n>> Generando Figura 2...\n")
 
@@ -758,7 +640,47 @@ ggsave("Figure2_MPCS_states_H10.png", p_fig2, width = 12, height = 7, dpi = 300)
 cat("   Figura 2 guardada: Figure2_MPCS_states_H10.png\n")
 
 # =============================================================================
-# TABLA 7: Sensibilidad de horizonte H = 8, 10, 12
+# VERIFICACIÓN DE TASAS
+# =============================================================================
+cat("\n=== VERIFICACIÓN DE TASAS ===\n")
+
+estados_ord <- c("E1_Sin_diagnostico","E2_Sin_adherencia","E3_Adherencia_parcial",
+                 "E4_Adherencia_plena","E5_Control")
+
+n_pooled <- sapply(estados_ord, function(e) {
+  sum(sapply(resultados, function(r) {
+    idx <- which(r$tabla_estados$Estado_Markov == e)
+    if (length(idx) == 0) 0 else r$tabla_estados$n[idx]
+  }))
+})
+t1_u <- (n_pooled[3] + n_pooled[4] + n_pooled[5]) / (n_pooled[2] + n_pooled[3] + n_pooled[4] + n_pooled[5])
+t2_u <- (n_pooled[4] + n_pooled[5]) / (n_pooled[3] + n_pooled[4] + n_pooled[5])
+t3_u <- n_pooled[5] / (n_pooled[4] + n_pooled[5])
+cat(sprintf("Test 1 (pooled, sin ponderar):   t1=%.4f  t2=%.4f  t3=%.4f\n", t1_u, t2_u, t3_u))
+
+if (!is.null(resultados[[1]]$df)) {
+  df_all <- do.call(rbind, lapply(resultados, function(r) r$df))
+  res_w <- estimar_tasas_transversal(df_all$Estado_Markov,
+                                     orden_estados = estados_ord,
+                                     pesos = df_all$PESO15_AMAS)
+  cat(sprintf("Test 2 (pooled, ponderado):      t1=%.4f  t2=%.4f  t3=%.4f  t4=%.4f\n",
+              res_w$tasas[1], res_w$tasas[2], res_w$tasas[3], res_w$tasas[4]))
+}
+
+if (!is.null(resultados[[1]]$df)) {
+  df_all <- do.call(rbind, lapply(resultados, function(r) r$df))
+  df_dx  <- df_all %>% filter(Estado_Markov != "E1_Sin_diagnostico")
+  res_dx <- estimar_tasas_transversal(df_dx$Estado_Markov,
+                                      orden_estados = estados_ord[-1],
+                                      pesos = df_dx$PESO15_AMAS)
+  cat(sprintf("Test 3 (solo diagnosticados):    t1=%.4f  t2=%.4f  t3=%.4f\n",
+              res_dx$tasas[1], res_dx$tasas[2], res_dx$tasas[3]))
+}
+
+cat(sprintf("Publicado (3 tasas):             t1=0.4800  t2=0.8900  t3=0.6200\n\n"))
+
+# =============================================================================
+# TABLA 7
 # =============================================================================
 cat("\n>> Calculando Tabla 7 (sensibilidad horizonte)...\n")
 
@@ -778,19 +700,19 @@ for (H_val in c(8, 10, 12)) {
 tabla7 <- tabla_H %>%
   pivot_wider(names_from = H, values_from = I_MPCS, names_prefix = "H")
 
-cat("\n--- Tabla 7: Sensibilidad horizonte ---\n")
+cat("\n--- Tabla 7 ---\n")
 print(tabla7)
 write.csv(tabla7, "MPCS_table7_horizon_sensitivity.csv", row.names = FALSE)
 
 # =============================================================================
-# TABLA 8 + FIGURA 4: Sensibilidad de pesos (10,000 simulaciones)
+# TABLA 8 + FIGURA 4
 # =============================================================================
-cat("\n>> Calculando Tabla 8 / Figura 4 (sensibilidad pesos)...\n")
+cat("\n>> Calculando Tabla 8 / Figura 4...\n")
 
 set.seed(123)
 n_sim <- 10000
 tabla8_rows <- list()
-sim_por_region <- list()  # guarda I_MPCS_sim de cada región para la Figura 4
+sim_por_region <- list()
 
 for (nombre_region in names(resultados)) {
   res_reg <- resultados[[nombre_region]]
@@ -809,21 +731,19 @@ for (nombre_region in names(resultados)) {
   I_MPCS_sim <- apply(pesos_sim, 1, function(w) {
     w[1]*I_G + w[2]*I_M + w[3]*I_J
   })
-  k_sim <- pmin(1, I_MPCS_sim * 0.65 * 1.5)
-  
+  # Clasificación sobre I_MPCS (Tabla 4), no sobre k.
   tipo_sim <- case_when(
-    k_sim < 0.25 ~ "Informational",
-    k_sim < 0.50 ~ "Structural",
-    k_sim < 0.75 ~ "Normative",
+    I_MPCS_sim < 0.25 ~ "Informational",
+    I_MPCS_sim < 0.50 ~ "Structural",
+    I_MPCS_sim < 0.75 ~ "Normative",
     TRUE ~ "Systemic multi-nudge"
   )
   
   I_MPCS_default <- 0.35*I_G + 0.40*I_M + 0.25*I_J
-  k_default <- min(1, I_MPCS_default * 0.65 * 1.5)
   tipo_default <- case_when(
-    k_default < 0.25 ~ "Informational",
-    k_default < 0.50 ~ "Structural",
-    k_default < 0.75 ~ "Normative",
+    I_MPCS_default < 0.25 ~ "Informational",
+    I_MPCS_default < 0.50 ~ "Structural",
+    I_MPCS_default < 0.75 ~ "Normative",
     TRUE ~ "Systemic multi-nudge"
   )
   
@@ -845,11 +765,10 @@ for (nombre_region in names(resultados)) {
 tabla8 <- do.call(rbind, tabla8_rows)
 rownames(tabla8) <- NULL
 
-cat("\n--- Tabla 8: Sensibilidad pesos (Tacna) ---\n")
+cat("\n--- Tabla 8 ---\n")
 print(tabla8)
 write.csv(tabla8, "MPCS_table8_weight_sensitivity.csv", row.names = FALSE)
 
-# Figura 4
 df_sens <- data.frame(I_MPCS = I_MPCS_sim, Type = tipo_sim)
 colores_sens <- c(
   "Informational" = "#74B3CE",
@@ -874,7 +793,7 @@ p_fig4 <- ggplot(df_sens, aes(x = I_MPCS, fill = Type)) +
            hjust = 0, size = 3.5, color = "#C0392B") +
   scale_fill_manual(values = colores_filtrados) +
   labs(
-    title = "Sensitivity Analysis — Tacna",
+    title = "Sensitivity Analysis",
     subtitle = "10,000 random combinations of weights w1, w2, w3",
     x = "MPCS Index", y = "Frequency",
     fill = "Nudge type"
@@ -886,9 +805,9 @@ ggsave("Figure4_MPCS_sensitivity.png", p_fig4, width = 10, height = 6, dpi = 300
 cat("   Figura 4 guardada: Figure4_MPCS_sensitivity.png\n")
 
 # =============================================================================
-# TABLA 9: Sensibilidad de umbral de correlación
+# TABLA 9
 # =============================================================================
-cat("\n>> Calculando Tabla 9 (sensibilidad umbral)...\n")
+cat("\n>> Calculando Tabla 9...\n")
 
 umbrales <- c(0.05, 0.10, 0.15)
 tabla9 <- data.frame(Region = sapply(regiones_sur, function(r) r$nombre), stringsAsFactors = FALSE)
@@ -903,17 +822,20 @@ for (u in umbrales) {
   tabla9[[paste0("Threshold_", gsub("\\.", "_", sprintf("%.2f", u)))]] <- nodos
 }
 
-cat("\n--- Tabla 9: Sensibilidad umbral ---\n")
+cat("\n--- Tabla 9 ---\n")
 print(tabla9)
 write.csv(tabla9, "MPCS_table9_threshold_sensitivity.csv", row.names = FALSE)
 
 # =============================================================================
-# TABLA 10: Sensibilidad de parámetros Markov (t1, t2, t3)
+# TABLA 10 (Markov): baseline per-región, 4 tasas
 # =============================================================================
 cat("\n>> Calculando Tabla 10 (sensibilidad tasas Markov)...\n")
 
-tasas_base <- c(t1 = 0.48, t2 = 0.89, t3 = 0.62)
 variaciones <- c("minus20" = -0.20, "minus10" = -0.10, "plus10" = 0.10, "plus20" = 0.20)
+
+tasas_base_reg <- do.call(rbind, lapply(resultados, function(r) r$tasas))
+rownames(tasas_base_reg) <- names(resultados)
+colnames(tasas_base_reg) <- c("t1", "t2", "t3", "t4")
 
 tabla10 <- data.frame(
   Parameter = character(),
@@ -924,39 +846,36 @@ tabla10 <- data.frame(
   stringsAsFactors = FALSE
 )
 
-for (param_name in names(tasas_base)) {
-  t_base <- tasas_base[param_name]
+for (param_name in c("t1", "t2", "t3", "t4")) {
+  param_idx <- which(colnames(tasas_base_reg) == param_name)
+  
   for (v_name in names(variaciones)) {
     v_pct <- variaciones[v_name]
-    t_nueva <- t_base * (1 + v_pct)
-    t_nueva <- max(0, min(1, t_nueva))
     
     I_MPCS_vals <- numeric(length(regiones_sur))
     for (i in seq_along(regiones_sur)) {
-      r <- regiones_sur[[i]]
-      t1_i <- ifelse(param_name == "t1", t_nueva, tasas_base["t1"])
-      t2_i <- ifelse(param_name == "t2", t_nueva, tasas_base["t2"])
-      t3_i <- ifelse(param_name == "t3", t_nueva, tasas_base["t3"])
-      res <- calcular_mpcs_numerico(df_raw, r$codigo, r$nombre, 
+      reg_name <- regiones_sur[[i]]$nombre
+      tasas_reg <- tasas_base_reg[reg_name, ]
+      tasas_reg[param_idx] <- tasas_reg[param_idx] * (1 + v_pct)
+      tasas_reg <- pmin(pmax(tasas_reg, 0), 1)
+      
+      res <- calcular_mpcs_numerico(df_raw, regiones_sur[[i]]$codigo,
+                                    regiones_sur[[i]]$nombre,
                                     horizonte = 10, umbral = 0.10,
-                                    t1 = t1_i, t2 = t2_i, t3 = t3_i)
+                                    tasas_forzadas = as.numeric(tasas_reg))
       I_MPCS_vals[i] <- res$I_MPCS
     }
     
-    # Comparar con baseline (tabla_comp ya calculado con tasas base)
     delta <- abs(I_MPCS_vals - tabla_comp$I_MPCS)
     mean_delta <- round(mean(delta), 3)
     
-    # Verificar ranking (orden de regiones por I_MPCS)
     rank_base <- order(tabla_comp$I_MPCS, decreasing = TRUE)
     rank_new <- order(I_MPCS_vals, decreasing = TRUE)
     ranking_ok <- all(rank_base == rank_new)
     
-    # Verificar tipo de nudge (todos son Normative en baseline)
-    k_vals <- pmin(1, I_MPCS_vals * 0.65 * 1.5)
-    tipos <- case_when(k_vals < 0.25 ~ "Informational", k_vals < 0.50 ~ "Structural",
-                       k_vals < 0.75 ~ "Normative", TRUE ~ "Systemic multi-nudge")
-    nudge_ok <- all(tipos == "Normative")
+    tipos <- case_when(I_MPCS_vals < 0.25 ~ "Informational", I_MPCS_vals < 0.50 ~ "Structural",
+                       I_MPCS_vals < 0.75 ~ "Normative", TRUE ~ "Systemic multi-nudge")
+    nudge_ok <- all(tipos == tabla_comp$Tipo_nudge)
     
     tabla10 <- rbind(tabla10, data.frame(
       Parameter = param_name,
@@ -969,16 +888,16 @@ for (param_name in names(tasas_base)) {
   }
 }
 
-cat("\n--- Tabla 10: Sensibilidad tasas Markov ---\n")
+cat("\n--- Tabla 10 (Markov) ---\n")
 print(tabla10)
 write.csv(tabla10, "MPCS_table10_markov_sensitivity.csv", row.names = FALSE)
+cat("\nNota: t1 (E1→E2) está calibrada a 0.20; t2, t3, t4 son estimadas per-región.\n")
+cat("La sensibilidad de t1 mide el efecto de perturbaciones sobre la tasa calibrada.\n") 
 
 # =============================================================================
-# TABLA 10 (continuación): Sensibilidad de payoffs de game theory
+# TABLA 10 (Game theory)
 # =============================================================================
-cat("
->> Calculando Tabla 10 (sensibilidad payoffs game theory)...
-")
+cat("\n>> Calculando Tabla 10 (sensibilidad payoffs game theory)...\n")
 
 tabla10_gt <- data.frame(
   Parameter = character(),
@@ -999,12 +918,10 @@ for (param_name in c("a_AA", "a_AR", "a_RA", "a_RR")) {
                                          horizonte = 10, umbral = 0.10)
       alpha_reg <- res_base$Alpha
       
-      # Calcular payoff baseline para esta región
       a_AR_base <- -(0.5 + 0.5 * (1 - alpha_reg))
       a_RA_base <- 0.5 + 0.5 * alpha_reg
       a_RR_base <- 0.5 + 0.5 * (1 - alpha_reg)
       
-      # Preparar argumentos para do.call
       args_list <- list(
         df_raw = df_raw,
         codigo_region = r$codigo,
@@ -1034,10 +951,9 @@ for (param_name in c("a_AA", "a_AR", "a_RA", "a_RR")) {
     rank_new <- order(I_MPCS_vals, decreasing = TRUE)
     ranking_ok <- all(rank_base == rank_new)
     
-    k_vals <- pmin(1, I_MPCS_vals * 0.65 * 1.5)
-    tipos <- case_when(k_vals < 0.25 ~ "Informational", k_vals < 0.50 ~ "Structural",
-                       k_vals < 0.75 ~ "Normative", TRUE ~ "Systemic multi-nudge")
-    nudge_ok <- all(tipos == "Normative")
+    tipos <- case_when(I_MPCS_vals < 0.25 ~ "Informational", I_MPCS_vals < 0.50 ~ "Structural",
+                       I_MPCS_vals < 0.75 ~ "Normative", TRUE ~ "Systemic multi-nudge")
+    nudge_ok <- all(tipos == tabla_comp$Tipo_nudge)
     
     tabla10_gt <- rbind(tabla10_gt, data.frame(
       Parameter = param_name,
@@ -1050,18 +966,55 @@ for (param_name in c("a_AA", "a_AR", "a_RA", "a_RR")) {
   }
 }
 
-cat("
---- Tabla 10 (Game Theory): Sensibilidad payoffs ---
-")
+cat("\n--- Tabla 10 (Game Theory) ---\n")
 print(tabla10_gt)
 
-# Combinar ambas partes de Table 10
 tabla10_completa <- rbind(tabla10, tabla10_gt)
 write.csv(tabla10_completa, "MPCS_table10_complete_sensitivity.csv", row.names = FALSE)
-cat("
->> Tabla 10 completa guardada: MPCS_table10_complete_sensitivity.csv
-")
+cat("\n>> Tabla 10 completa guardada: MPCS_table10_complete_sensitivity.csv\n")
 
-cat("
-✅ TODAS LAS FIGURAS Y TABLAS GENERADAS CORRECTAMENTE
-")
+# =============================================================================
+# ROBUSTEZ: per-región (4 tasas) vs. calibrado (3 tasas + E1→E2=0.20)
+# =============================================================================
+cat("\n=== ROBUSTEZ: TASAS PER-REGIÓN vs. CALIBRADAS ===\n")
+
+tasas_calibradas <- c(0.48, 0.89, 0.62)
+
+tabla_robustez <- data.frame(
+  Region = character(), N = integer(),
+  t1_E1E2 = numeric(), t2_E2E3 = numeric(), t3_E3E4 = numeric(), t4_E4E5 = numeric(),
+  I_MPCS_per_region = numeric(),
+  I_MPCS_calibrado  = numeric(),
+  delta = numeric(),
+  stringsAsFactors = FALSE
+)
+
+for (reg in names(resultados)) {
+  r <- resultados[[reg]]
+  idx_reg <- which(sapply(regiones_sur, `[[`, "nombre") == reg)
+  cod_reg <- regiones_sur[[idx_reg]]$codigo
+  
+  res_cal <- calcular_mpcs_numerico(df_raw, cod_reg, reg,
+                                    horizonte = 10, umbral = 0.10,
+                                    tasas_forzadas = tasas_calibradas)
+  
+  tabla_robustez <- rbind(tabla_robustez, data.frame(
+    Region = reg, N = r$N,
+    t1_E1E2 = round(r$tasas[1], 4),
+    t2_E2E3 = round(r$tasas[2], 4),
+    t3_E3E4 = round(r$tasas[3], 4),
+    t4_E4E5 = round(r$tasas[4], 4),
+    I_MPCS_per_region = round(r$I_MPCS, 4),
+    I_MPCS_calibrado  = round(res_cal$I_MPCS, 4),
+    delta = round(abs(r$I_MPCS - res_cal$I_MPCS), 4),
+    stringsAsFactors = FALSE
+  ))
+}
+
+print(tabla_robustez)
+cat(sprintf("\nDelta máximo: %.4f   Delta medio: %.4f\n",
+            max(tabla_robustez$delta), mean(tabla_robustez$delta)))
+write.csv(tabla_robustez, "MPCS_supplementary_robustez_tasas.csv", row.names = FALSE)
+cat(">> Guardada: MPCS_supplementary_robustez_tasas.csv\n")
+
+cat("\n✅ TODAS LAS FIGURAS Y TABLAS GENERADAS CORRECTAMENTE\n")
