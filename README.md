@@ -102,7 +102,7 @@ The I_MPCS values reported in the manuscript (Table 6) were computed using the
 ENDES 2024 microdata release. The provided analysis script (MPCS_SUR_COMPARATIVO.R)
 reconstructs the full workflow from raw data and reproduces the same regional
 ranking and nudge classifications.
-Minor numerical differences (< 0.002 in I_MPCS, < 0.003 in I_Markov) may arise
+Minor numerical differences (< 0,0117 in I_MPCS, < 0,0292 in I_Markov) may arise
 due to iterative refinements in outlier handling and state-definition logic
 during manuscript preparation. These differences do not affect the qualitative
 conclusions (regional ranking, optimal nudge node, or nudge type classification)
